@@ -8,11 +8,11 @@
 transcripts, screenshots, clips, packages and edited videos that you *and* your
 AI agent can work with.
 
-[![Version v0.11.0 beta](https://img.shields.io/badge/version-v0.11.0%20beta-1f8fbf)](docs/release-notes/RELEASE_NOTES_v0.11.0.txt)
+[![Version v0.11.0 beta](https://img.shields.io/badge/version-v0.11.0%20beta-1f8fbf)](https://github.com/Aintologic/media-manglers/releases/tag/v0.11.0)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078d4)](#download-and-documentation)
 
-**[Download (coming soon)](#download-and-documentation)** ·
+**[Download](https://github.com/Aintologic/media-manglers/releases)** ·
 **[Documentation](docs/README.md)** ·
 **[Report a bug or request a feature](https://github.com/Aintologic/media-manglers/issues)**
 
@@ -53,9 +53,12 @@ included: searchable transcripts and catalogs of whole archive folders.
 
 ## Download and documentation
 
-- **Download:** the first public release is coming soon. When it is published,
-  get the `VideoManglerWorkbench` zip from [Releases](https://github.com/Aintologic/media-manglers/releases),
-  extract the whole zip, and run `VideoManglerWorkbench.exe`.
+- **Download:** get `VideoManglerWorkbench-v0.11.0-windows-x64.zip` from
+  [Releases](https://github.com/Aintologic/media-manglers/releases), extract the
+  whole zip to a short folder, and run `VideoManglerWorkbench.exe`. It is a beta
+  for Windows 10 and 11. The app also needs FFmpeg, Python with Whisper and, for
+  web videos, yt-dlp: **Settings > Dependencies** shows what is missing and where
+  to get each one.
 - **Every feature in one guide:** the [feature guide](docs/workbench/FEATURE_GUIDE.md)
   says what each feature is for, how to start it, what you get, and its limits.
 - **Documentation:** every guide, from [getting started](docs/workbench/GETTING_STARTED.md)

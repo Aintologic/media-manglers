@@ -2,9 +2,8 @@
 
 ## Download and open the Workbench
 
-1. Open the [Media Manglers releases page](https://github.com/Aintologic/media-manglers/releases). The first public
-   release is coming soon.
-2. Download `VideoManglerWorkbench-vX.Y.Z.zip` and extract the entire folder.
+1. Open the [Media Manglers releases page](https://github.com/Aintologic/media-manglers/releases).
+2. Download `VideoManglerWorkbench-vX.Y.Z-windows-x64.zip` and extract the entire folder.
 3. Launch `VideoManglerWorkbench.exe` from that folder. Do not copy only the
    executable away from its Help, engine, and runtime sidecars.
 4. Let the Workbench check readiness automatically. Open **Settings >

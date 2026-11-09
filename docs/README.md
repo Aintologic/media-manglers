@@ -6,8 +6,8 @@ project overview, return to the [Media Manglers README](../README.md).
 
 ## Start here
 
-- [Releases](https://github.com/Aintologic/media-manglers/releases) — The first public release is coming
-  soon; the Workbench download will be published there.
+- [Releases](https://github.com/Aintologic/media-manglers/releases) — Download the
+  Workbench here.
 - [Workbench Getting Started](workbench/GETTING_STARTED.md) — Download, open,
   check readiness, and complete a first guided run.
 - [Every feature in one guide](workbench/FEATURE_GUIDE.md) — What each
@@ -68,8 +68,7 @@ project overview, return to the [Media Manglers README](../README.md).
 - [v0.11.0 release notes](release-notes/RELEASE_NOTES_v0.11.0.txt) — Review the
   current release scope and operator changes.
 - [All GitHub releases](https://github.com/Aintologic/media-manglers/releases)
-  — Published versions and downloadable assets (the first public release is
-  coming soon).
+  — Published versions and downloadable assets.
 
 ## AI Video Editor
 

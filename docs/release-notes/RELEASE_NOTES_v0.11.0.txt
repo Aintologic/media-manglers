@@ -7,8 +7,8 @@ Release status
 v0.11.0 beta 1 follows v0.9.6 beta 1. v0.10.0 was prepared but never
 published, so everything it held is in this release too. It is a beta: it
 is published so it can be run on real recordings and refined from what is
-found. Earlier builds are not available here; the first public release is
-coming soon.
+found. It is the first public release; earlier builds are not available
+here.
 
 In short
 --------
