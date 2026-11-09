@@ -7,7 +7,8 @@ optional workflows that rely on third-party media, tools, or services.
 Repository code
 ---------------
 
-The code in this repository is licensed under the Apache License, Version 2.0.
+The code in this repository is licensed under the GNU Affero General Public
+License, version 3 or (at your option) any later version (AGPL-3.0-or-later).
 See LICENSE for the repository license text.
 
 Optional tooling and services
@@ -26,8 +27,8 @@ Examples include:
 
 Practical notes:
 
-- These tools and services are separate from the Apache License 2.0 that covers this
-  repository's code.
+- These tools and services are separate from the GNU AGPL-3.0-or-later that
+  covers this repository's code.
 - OpenAI is optional and not bundled with the repo.
 - OpenAI API usage depends on your own account, key, pricing, and service
   terms.
@@ -185,6 +186,7 @@ General rule
 ------------
 
 Do not assume that referenced media, metadata, or third-party services become
-Apache 2.0 licensed just because this repository is Apache 2.0 licensed.
+AGPL-3.0-or-later licensed just because this repository's code is
+AGPL-3.0-or-later licensed.
 If you redistribute any referenced media or exported content, follow the
 upstream terms for that specific source.
