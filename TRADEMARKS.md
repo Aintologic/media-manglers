@@ -5,14 +5,23 @@ The software in this repository is licensed under the GNU AGPL-3.0-or-later
 (`THIRD_PARTY_NOTICES.txt`). **Those licenses do not grant any rights in the
 names or logos below.**
 
-The **AÏntologic** name and its logos, and the **Media Manglers** name, are
-**not** licensed under the AGPL. They are brands, and they are kept separate on
-purpose.
+These names and logos are **not** licensed under the AGPL. They are brands, and
+they are kept separate on purpose:
+
+- the **AÏntologic** name and its logos;
+- the **Media Manglers**, **Video Mangler**, **Audio Mangler** and
+  **Video Mangler Workbench** names;
+- the Media Manglers logos: the Video Mangler and Audio Mangler app icons in
+  the top-level `assets/` folder (`Video Mangler.ico`, `Video Mangler.png`,
+  `Audio Mangler.ico` and `Audio Mangler.png`).
 
 What you may not do:
 
-- Use the **AÏntologic** or **Media Manglers** names, or the AÏntologic logos,
-  to **sell** anything, or to **imply endorsement, sponsorship or
-  affiliation**.
-- Give a **modified version** of this software the **AÏntologic** or
-  **Media Manglers** name as its product name. Rename your fork.
+- Use these names or logos to **sell** anything, or to **imply endorsement,
+  sponsorship or affiliation**.
+- Give a **modified version** of this software any of these names as its
+  product name, or these app icons as its icon. Rename your fork and give it
+  its own icon.
+
+Media Manglers is not affiliated with or endorsed by iRacing, OBS, OpenAI,
+Anthropic or any game publisher.

@@ -84,12 +84,15 @@ describe it, build it.
 
 Free to download is not the same as "do anything you like". In short:
 
-- **Code**: GNU **AGPL-3.0-or-later**. See [`LICENSE`](LICENSE).
+- **Code, documentation text and screenshots**: GNU **AGPL-3.0-or-later**.
+  See [`LICENSE`](LICENSE).
 - **Third-party parts** that the packaged Workbench bundles (Qt for Python, the
   FFmpeg libraries inside Qt, the Python runtime and others): their **own
   licenses**. See [`THIRD_PARTY_NOTICES.txt`](THIRD_PARTY_NOTICES.txt) and the
   [`licenses`](licenses/) folder.
-- **Names and logos**: the AÏntologic name and logos and the Media Manglers
-  name are **not** covered by the code license. See [`TRADEMARKS.md`](TRADEMARKS.md).
+- **Names and logos**: the AÏntologic name and logos; the Media Manglers,
+  Video Mangler, Audio Mangler and Video Mangler Workbench names; and the app
+  icons in [`assets/`](assets/) are **not** covered by the AGPL. See
+  [`TRADEMARKS.md`](TRADEMARKS.md).
 
 Copyright 2026 Media Manglers Contributors.
