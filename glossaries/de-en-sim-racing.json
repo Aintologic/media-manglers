@@ -1,0 +1,111 @@
+{
+  "profile": "de-en-sim-racing",
+  "description": "Initial German-to-English Hybrid Accuracy glossary for the sim-racing benchmark lane.",
+  "source_language": "de",
+  "target_language": "en",
+  "lane_id": "hybrid-medium-ai-translate",
+  "benchmark_note": "Translate product, racing, and UI terms consistently. 'so heißt das in Crew Chief selber' should stay anchored to the product name Crew Chief, not a human role.",
+  "terms": [
+    {
+      "source_term": "Crew Chief",
+      "preferred_translations": [
+        "Crew Chief"
+      ],
+      "notes": "Product/app name. Do not translate as a human role unless context clearly indicates a person.",
+      "forbidden_patterns": [
+        "I am the Crew Chief",
+        "I'm the Crew Chief",
+        "I am Crew Chief",
+        "I'm Crew Chief"
+      ]
+    },
+    {
+      "source_term": "iRacing",
+      "preferred_translations": [
+        "iRacing"
+      ],
+      "notes": "Product name."
+    },
+    {
+      "source_term": "LMU",
+      "preferred_translations": [
+        "LMU"
+      ],
+      "notes": "Product abbreviation."
+    },
+    {
+      "source_term": "DRS",
+      "preferred_translations": [
+        "DRS"
+      ],
+      "notes": "Do not corrupt into DAS or DS.",
+      "forbidden_patterns": [
+        "DAS",
+        "DS"
+      ]
+    },
+    {
+      "source_term": "Full Course Yellow",
+      "preferred_translations": [
+        "Full Course Yellow"
+      ],
+      "notes": "Preserve the racing term.",
+      "forbidden_patterns": [
+        "Full Cross",
+        "Full Crosiolo"
+      ]
+    },
+    {
+      "source_term": "Oval Racing",
+      "preferred_translations": [
+        "Oval Racing"
+      ]
+    },
+    {
+      "source_term": "pit",
+      "preferred_translations": [
+        "pit"
+      ]
+    },
+    {
+      "source_term": "pits",
+      "preferred_translations": [
+        "pits"
+      ]
+    },
+    {
+      "source_term": "pit lane",
+      "preferred_translations": [
+        "pit lane"
+      ]
+    },
+    {
+      "source_term": "Properties",
+      "preferred_translations": [
+        "Properties"
+      ],
+      "notes": "UI label."
+    },
+    {
+      "source_term": "Settings",
+      "preferred_translations": [
+        "Settings"
+      ],
+      "notes": "UI label."
+    },
+    {
+      "source_term": "Use Sweary Messages",
+      "preferred_translations": [
+        "Use Sweary Messages"
+      ],
+      "notes": "Preserve as a UI label."
+    },
+    {
+      "source_term": "Dark Mode UI",
+      "preferred_translations": [
+        "Dark Mode UI"
+      ],
+      "notes": "Preserve as a UI label."
+    }
+  ]
+}

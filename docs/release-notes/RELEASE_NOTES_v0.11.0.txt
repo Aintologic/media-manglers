@@ -1,0 +1,369 @@
+Media Manglers v0.11.0 (beta)
+=============================
+
+Release status
+--------------
+
+v0.11.0 beta 1 follows v0.9.6 beta 1. v0.10.0 was prepared but never
+published, so everything it held is in this release too. It is a beta: it
+is published so it can be run on real recordings and refined from what is
+found. Earlier builds are not available here; the first public release is
+coming soon.
+
+In short
+--------
+
+The Workbench is four features on one shared engine: Package any video for
+AI, Find my bug reports, Watch the raw bin, and the AI Video Editor. They
+find your voice, write it down and leave out invented lines the same way.
+
+New since v0.9.6: a new look for every screen with a Text size setting; the
+raw bin library; the AI Video Editor's own page, built around its player;
+waveforms of every track in the built-in player; a History that keeps every
+run; Find my bug reports' lists kept in the library; and a clear message
+when a tool is missing. Every feature is described in one guide:
+docs/workbench/FEATURE_GUIDE.md (also under Help in the app).
+
+Read this before you upgrade
+----------------------------
+
+- The first time v0.11.0 starts, it moves your run history, Find my bug
+  reports' never-use list, its list of recordings already done and its
+  stopped run (the one Continue picks up) out of settings.json into the
+  app's library. It also takes stray copies of those lists out of your own
+  profiles. Built-in profiles are not touched, and nothing else in
+  settings.json changes.
+- Before it changes anything, it copies settings.json, your own profiles
+  and the library into a backup folder and checks the copies. The backup is
+  in %LOCALAPPDATA%\MediaManglers\Workbench\library\backups\migrations,
+  with a HOW_TO_RESTORE.txt that says how to put everything back. These
+  backups are never deleted by the app.
+- If settings.json cannot be read, nothing is moved, a copy of it is kept,
+  and the Workbench says so once and carries on.
+- After that first start, do not go back to an older build. An older build
+  does not know the history and the lists are now in the library: History
+  would look empty, and Find my bug reports would offer recordings already
+  done, and ones you marked never-use, as new. If you must go back, close
+  the Workbench and follow HOW_TO_RESTORE.txt first; anything done after the
+  move is not in that backup.
+
+What a new PC needs
+-------------------
+
+The download holds the Workbench itself. Extract the whole zip and run
+VideoManglerWorkbench.exe. To review recordings it also needs these, which
+you install yourself:
+
+- Windows 10 or 11, 64-bit.
+- Windows PowerShell, which is built into Windows.
+- Python 3 (3.12 is the version the app suggests).
+- FFmpeg, which includes FFprobe.
+- Whisper for local transcripts, with PyTorch, both installed with pip into
+  that Python. The Whisper model is fetched only after you approve it in
+  Settings > Dependencies.
+- Only if you use them: yt-dlp for web-video links in Full Review, and VLC
+  for Play with > VLC.
+
+Settings > Dependencies shows what is missing or out of date. Download opens
+the tool's official page, and Copy winget command copies the install
+command where Windows Package Manager has the tool. The app never downloads
+or installs a tool by itself.
+
+A new look (every screen)
+-------------------------
+
+- New dark and light colours, clearer text, rounded cards, a clear focus
+  ring, and a bar on the selected row. Every drop-down list shows its arrow.
+  Text is sharper at larger sizes.
+- Text size (Settings > General / Startup): 100%, 110%, 125% or 150%. It
+  changes the whole app at once and is remembered. Ctrl+Plus, Ctrl+Minus and
+  Ctrl+0 change it on any page and in the player. Nothing is cut off at any
+  size: rows wrap and pages scroll instead.
+- The left menu is grouped as Make, Library, Results and Running, with
+  Settings and Help at the bottom. Every button keeps its name, each has its
+  own icon, and Progress shows a "1" while a job runs.
+- Buttons say what they are doing ("Copying...", "Saving..."), cannot be
+  pressed twice, then say "Copied" or "Saved" beside themselves, or what
+  went wrong and what to do next. Save settings no longer opens a pop-up.
+- A long job shows a banner on the page that started it, with a progress
+  bar, the time left when known, and Open in Queue / Progress.
+
+Finding your voice (every feature)
+----------------------------------
+
+- The track with your voice is chosen in this order, and the app says which
+  decided it: track names saved by OBS ("from track name"); then the
+  setting Settings > General / Startup > "Narration track, for recordings
+  without track names", which gives Tracks 1 to 6 Auto, Narration, Never
+  narration, Game audio or Full mix ("from your setting"); then listening
+  ("auto-detected").
+- A track named with "narration" is always your voice. Music, game, spotter,
+  engineer, system, Discord and voice chat tracks never are.
+- Full Review and Transcript Only use the same rule on Auto. With no voice
+  track they transcribe the full mix, and never report "no narration found".
+- Reading a long recording from a slow drive no longer times out. It stops
+  only when it makes no progress for three minutes, and says how far it got.
+
+Transcripts you can trust (every feature)
+-----------------------------------------
+
+- Words to spell right (Settings > General / Startup): one list of your own
+  names and terms, given to Whisper by every feature. "Word=heard as" also
+  corrects the transcript. It replaces the profile transcription glossary,
+  keeps what you saved, and starts with iRacing, SimHub and Crew Chief.
+- Lines Whisper invents are left out: stock phrases over silence or music,
+  a phrase repeated over and over, lines heard on another track (music,
+  game, spotter, voice chat), lines written while your microphone was almost
+  silent, and guesses Whisper itself rated as unsure. Each is listed with its
+  reason, and the built-in player shows it.
+- The same recording now gives the same transcript every time it is run.
+
+History keeps every run
+-----------------------
+
+- History keeps every run, not only the last 30. It shows the newest 200;
+  Show more shows older ones. Home's Recent runs shows the newest five.
+- Each run keeps what happened to every recording in it, as the feature
+  reported it. A recording no feature reported on says "not reported".
+- History says what really happened: a raw bin scan that could not reach
+  the recordings drive is failed; a stopped Find my bug reports or AI Video
+  Editor run keeps how far each recording got; an Inbox run shows your
+  recordings folders; a New Review run, raw bin scan or Deep scan where
+  some recordings failed is completed with problems; and a run cut off by a
+  crash or by closing the app shows interrupted instead of vanishing.
+- settings.json and your profiles are written safely, so a full disk or a
+  crash never leaves half a file.
+
+Find my bug reports
+-------------------
+
+- No microphone step: the app picks the track with your voice by itself.
+- A ticket needs a request ("make a ticket", "open an issue", "instructions
+  for AI", "feature request"). A word like "bug" or "fix this" said in
+  passing is listed in MENTIONED_NOT_ASKED.md instead, and your agent is told
+  to show you that list. Marker phrases match whole words only.
+- A recording with no narration is a normal result: the run ends as Done.
+- If the Whisper model is damaged, or the graphics card cannot be used, the
+  page says so while the run is going, with the fix.
+- About a quarter faster: the small review copy is made on the graphics card
+  while Whisper works.
+- Recordings are processed in the order you listed them. Continue leaves
+  nothing stale behind, and Stop leaves no work files.
+- The results say when the player's waveforms are ready.
+- The never-use list, the list of recordings already done and a stopped run
+  are now kept in the library (see "Read this before you upgrade"). Add
+  newest, Include ones already done, Never use, Allow again and Continue
+  work as before.
+- A recording identical to one already done (the same content, in another
+  folder) counts as done in Add newest. Never use stays with the copy you
+  marked, and follows it when it is renamed or moved.
+- A stopped run is no longer carried by Save profile as, by applying a
+  profile, or by a settings export.
+
+Package any video for AI (Full Review, Transcript Only)
+-------------------------------------------------------
+
+- Full Review makes its AI review ZIP by default. Every ZIP now keeps files
+  in folders past the Windows path limit.
+- Pause, Skip selected and Cancel review on Queue / Progress now work for
+  Full Review, Transcript Only and Review Media Inbox runs, as for Find my
+  bug reports. A skipped recording is not a failure.
+- Transcript audio mode shows "Using main setting" or "Overridden".
+- New Review: Preview track opens the built-in player on the chosen track
+  at the Preview region. The Output step says why a folder is refused, right
+  under the field.
+- Notices that need no action (estimates, pauses, skips) no longer make a
+  finished run look like it had problems.
+
+Watch the raw bin (new: the raw bin library)
+--------------------------------------------
+
+- New Raw bin page (left menu, and a Home card): one lasting list of every
+  recording in your recordings folders. Press Scan now.
+- For each recording: the app's guess (Keep likely, Check, Probably
+  nothing, Empty; Keep likely needs at least a minute of your speech), Idle
+  time from the game sound (marked "estimated" when it came from the full
+  mix), your decision (Keep, Delete candidate, Undecided) and labels.
+  Decisions and labels follow a recording that is renamed or moved.
+- The Mined column says which feature already mined a recording for
+  tickets: Inbox, Bugs, Inbox + Bugs, Bugs: no narration, or Bugs (old list)
+  for an entry from before the library kept the list, which is matched by
+  its path. What Find my bug reports did is never in Export view.
+- A different recording saved under a file name the library knows gets its
+  own entry, Undecided and with no labels. The one that was there keeps its
+  decision and labels and is shown as missing; put back, it gets them back.
+  A different recording saved under a mined recording's file name is not
+  shown as mined, except by an old-list entry, which only knew the path.
+- Deep scan transcribes chosen recordings and counts your "flag for AI"
+  requests. Export view saves the list as CSV or JSON. Play opens the
+  recording at its first speech.
+- Each recording is read at most once per scan and saved as soon as it is
+  done, so an interruption loses at most the one in progress. The library
+  is backed up daily.
+- The app only marks. It never writes, moves or deletes anything on the
+  drive that holds your recordings, and no feature may save its output
+  there.
+- Review Media Inbox is back on the left menu (Inbox) and on Home. It uses
+  the shared voice detection and asks for the track only when that cannot
+  tell; its track choice opens the built-in player on top of the dialog. A
+  blank evidence or scratch folder uses the main setting.
+
+AI Video Editor (now in the app)
+--------------------------------
+
+- Its own page: AI Editor in the left menu, and a Home card. It opens on
+  Make a video from a recording, a Continue card for the video you worked
+  on last, and Your videos: a picture card per video with a plain status
+  (Ready to watch, Waiting for your AI agent, Exported, Getting ready...,
+  Not prepared yet, Needs a preview). The page notices new versions by
+  itself.
+- Choose a recording lists the recordings the Raw bin knows, with what the
+  app already knows about each: its guess, minutes of speech, idle time,
+  your decision and labels, what mined it, and a video already made from
+  it. Browse for another file... opens the Windows file picker.
+- A video shows its versions as tabs and a row of labelled buttons: Video
+  settings (Your voice, Game sound, AI budget, Privacy masks...), Prompt
+  (Copy prompt for Claude Code or Codex, See the prompt first, Start a fresh
+  edit), Story & review, and Files (This version's files, Render a preview,
+  Export quality, the project and export folders, Refresh). A choice that
+  cannot be used yet stays in sight, greyed out, and says why.
+- The version's picture has its play choices on it: Play the final (full
+  quality) with Play the preview (quick, smaller) beside it, or Play the
+  preview when there is no final. It plays at once, on the page, in the
+  app's built-in player.
+- Under the player, the story is a strip of scenes. Click one to jump
+  there; its pen adds it to your notes. Your notes and the scenes go into
+  the next prompt.
+- The AI budget box says what each budget changes. See the prompt first
+  lets you edit the prompt for one copy. The story and the editor's own
+  review open as a readable page, short summary first.
+- Your AI agent starts with a plain-words plan of the story, reports in
+  plain words, and ends with the exact next steps in the app. It no longer
+  makes the final video itself: Approve and export... is your approval, and
+  its dialog says it makes the video on this PC, levels the sound for
+  upload, and uploads nothing.
+- A video always edits its own recording. A different file, even one with
+  the same name in another folder, is refused with the reason, unless it is
+  an exact copy.
+- Privacy masks: paint the parts of your cameras that must always be
+  blurred. The AI editor's commands cannot remove a mask, or move, leave out
+  or cover a masked camera. Prepare warns when no masks are drawn.
+- Start a fresh edit: a separate edit of the same race, so a second AI
+  editor can make its own cut.
+- On the shared engine: the recording is read once; the voice and game
+  tracks follow your track names and Narration track setting on Auto (a
+  track you pick shows Overridden); your Whisper settings, words to spell
+  right and the same invented-line filters are used, keeping short real
+  reactions.
+- Prepare also listens to the game sound for other voices (spotter, race
+  control, other drivers), so the AI editor can check what is fit to share.
+- Dead time: a minute or more where the game picture stands still or goes
+  black, or the game sound is quiet. The AI editor is told to cut it unless
+  it serves the story.
+- Export at the recording's own frame rate, up to 60 frames a second,
+  compressed once. Export quality: YouTube (recommended), Highest quality or
+  Smaller file, with a per-video override.
+- A revision that changes only the sound reuses the rendered pictures, so
+  its preview takes seconds. Renders carry readable names with the AI
+  editor's label.
+- Renders stay under the loudness peak limit, and a finished render is
+  written safely to disk before it is reported done.
+- Settings > AI Video Editor: the edited-videos folder, the AI budget, the
+  model names the prompts ask for, Export quality and Quick passes.
+
+Built-in player
+---------------
+
+- A waveform lane for every audio track (up to eight), named with its role.
+  Click a lane to go there, or its name to hear that track. Waveforms (W)
+  shows or hides them.
+- The sound is measured once in the background and kept in the cache
+  folder; after a run, its recordings are measured at low priority. A run
+  or closing the app stops it, and it carries on later.
+- Next sound / Previous sound (Ctrl+Right / Ctrl+Left) on the track you hear.
+- The moments the package found, marked on the time bar, with Next moment /
+  Previous moment (] / [).
+- It starts on the track the transcript came from, or the one a page asks
+  for. Next speech / Previous speech (Page Down / Page Up) jump between your
+  speech when a page hands it the stretches.
+- It fits a 1366x768 laptop screen.
+- Evidence: one [clips] row per recording, so clips and the small review
+  copy can be played even from a package with no bug reports.
+
+Start-up, tools and settings
+----------------------------
+
+- A missing tool is named in a bar at the top of the window, once per
+  launch, with Download, Open Settings > Dependencies and Not now. In
+  Settings > Dependencies, a missing or outdated tool has Download, and the
+  selected row shows the official page and Copy winget command. VLC has its
+  own row.
+- The Workbench and both scripts look for each tool the same way: the path
+  you chose, then PATH, then the tool's own install folders.
+- Closing the Workbench during the start-up readiness check closes it at
+  once.
+- Results go to a "Media Mangler" folder in your Videos folder by default.
+  A temporary folder is refused as an output folder, with the reason.
+- Cache folder (Settings > General / Startup), with a size cap and Clear
+  cache. Clearing it never loses a decision or a label.
+- The Default profile list starts with None, so saving Settings no longer
+  sets a default profile you did not choose.
+- Licences: THIRD_PARTY_NOTICES.txt names everything the package bundles,
+  and the licence texts ship in a licenses folder.
+
+Upgrading from v0.9.6
+---------------------
+
+- Settings, profiles and tool paths carry over. The profile transcription
+  glossary moves to Words to spell right.
+- The run history and Find my bug reports' lists move into the library at
+  the first start, after a backup (see "Read this before you upgrade").
+- If a saved output folder is a temporary folder, or is on the drive that
+  holds your recordings, runs now refuse it: choose another folder. Nothing
+  you already have is moved.
+
+Known limits
+------------
+
+- Progress on long jobs: a Raw bin scan reports only when a whole recording
+  is done, so on a very large recording it can look frozen for minutes
+  while it works, Queue / Progress shows one row for the folder, and after
+  Cancel review its count of finished items is wrong (272).
+- If the library cannot be opened when the Workbench starts (a damaged or
+  locked file), the Bugs page shows the never-use and already-done lists as
+  empty for that session, and nothing on screen says why. Nothing is lost:
+  they come back at the next start that opens the library (275).
+- For people running the test suite: the parallel runner puts most screen
+  tests in one process, so a full run takes about two hours instead of under
+  one (273). The app itself is not affected.
+- AI Video Editor: in some recordings the sound runs up to about one and a
+  half seconds ahead of the picture, and the editor does not correct it yet
+  (230).
+- AI Video Editor: a replay or a moving menu looks like driving, so dead
+  time there is not found. Its runs can be cancelled but not paused.
+- Raw bin: Deep scan does not run the cross-track check, and does not give
+  Whisper your words to spell right as a hint (233).
+- Raw bin: idle time comes from the game sound only. The game-picture
+  signal is used by the AI Video Editor only, and spotting whether someone
+  is at the rig from a camera area is not built (217, signal 3).
+- Raw bin: Delete candidate is only a mark. Deleting marked files is parked
+  (218).
+- Review Media Inbox keeps its own record of done recordings, apart from
+  the library, for now (224).
+- Next sound finds sound, not speech; on a microphone that also hears the
+  game or a fan it can land a few seconds off.
+- A full mix with no speech can still get invented lines (210).
+- Find my bug reports keeps its package as a folder; an optional ZIP export
+  is not built yet (204).
+
+Housekeeping
+------------
+
+- Test texts and a code comment that held lines from real recordings now
+  use made-up text.
+- The full test suite can run in parallel, several times faster than one
+  test after another.
+- The build's start-up check and the tests use throwaway folders, so they
+  never touch your own library, cache or privacy masks.
+- The build's smoke launch fails only on a real hang, and a build refuses to
+  start while the Workbench is running from its folder.

@@ -1,0 +1,65 @@
+{
+  "language": "en",
+  "segments": [
+    {
+      "id": 1,
+      "start": 540.0,
+      "end": 570.0,
+      "text": "The relative delta panel disappears after turn-in and the number freezes until the next straight."
+    },
+    {
+      "id": 2,
+      "start": 600.0,
+      "end": 608.0,
+      "text": "This needs to be a ticket."
+    },
+    {
+      "id": 3,
+      "start": 610.0,
+      "end": 640.0,
+      "text": "It begins when the car loads up in the fast right-hander, and the expected live value stops changing."
+    },
+    {
+      "id": 4,
+      "start": 645.0,
+      "end": 670.0,
+      "text": "The driver view still shows the stale number even after steering returns to center."
+    },
+    {
+      "id": 5,
+      "start": 750.0,
+      "end": 780.0,
+      "text": "The display comes back on the following straight, then freezes again under the next heavy load."
+    },
+    {
+      "id": 6,
+      "start": 785.0,
+      "end": 810.0,
+      "text": "Expected behavior is continuous updates through the corner instead of holding the old delta."
+    },
+    {
+      "id": 7,
+      "start": 855.0,
+      "end": 885.0,
+      "text": "The color also flips from green to red while the numeric value remains unchanged."
+    },
+    {
+      "id": 8,
+      "start": 900.0,
+      "end": 907.0,
+      "text": "New ticket: the pit limiter indicator is missing."
+    },
+    {
+      "id": 9,
+      "start": 915.0,
+      "end": 945.0,
+      "text": "That separate request belongs to the pit-lane display and not the delta panel discussion."
+    },
+    {
+      "id": 10,
+      "start": 1050.0,
+      "end": 1080.0,
+      "text": "Later unrelated narration describes traffic and fuel strategy."
+    }
+  ]
+}

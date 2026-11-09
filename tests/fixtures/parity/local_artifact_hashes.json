@@ -1,0 +1,75 @@
+{
+  "baseline_name": "local wrapper artifact baseline for 1_min_test_Video.mp4",
+  "normalization": {
+    "line_endings": "lf",
+    "output_root_placeholder": "__OUTPUT_ROOT__",
+    "package_root_placeholder": "__PACKAGE_ROOT__"
+  },
+  "video": {
+    "package_folder": "1_min_test_Video",
+    "artifacts": [
+      {
+        "name": "README_FOR_CODEX.txt",
+        "relative_path": "1_min_test_Video\\README_FOR_CODEX.txt",
+        "hash": "1d9c424673fc77b413b0fd9fe2e065c019af79235ee4eb433c436ef8ae67bf7f",
+        "lines": 42
+      },
+      {
+        "name": "frame_index.csv",
+        "relative_path": "1_min_test_Video\\frame_index.csv",
+        "hash": "eb93b27cb0458ac2a327dbb6978e4edf8cd705d5d65325e94a72065f947678d1",
+        "lines": 163
+      },
+      {
+        "name": "PROCESSING_SUMMARY.csv",
+        "relative_path": "PROCESSING_SUMMARY.csv",
+        "hash": "f0ea1619d4354d58fbbc70fd4093e5902e093e250fed1c5d9af1cd089fbd98db",
+        "lines": 3
+      },
+      {
+        "name": "CODEX_MASTER_README.txt",
+        "relative_path": "CODEX_MASTER_README.txt",
+        "hash": "041ea8685bf6382a2d3c1fa8cb330d0ae36149f4080f7a9e2539ed9d111e8e19",
+        "lines": 24
+      }
+    ]
+  },
+  "audio": {
+    "package_folder": "1_min_test_Video",
+    "artifacts": [
+      {
+        "name": "README_FOR_CODEX.txt",
+        "relative_path": "1_min_test_Video\\README_FOR_CODEX.txt",
+        "hash": "ba56b3eb25f92aa6fd5b2462ea9ee2eda04cd5297cd7ba66359a73aa11fe624f",
+        "lines": 35
+      },
+      {
+        "name": "segment_index.csv",
+        "relative_path": "1_min_test_Video\\segment_index.csv",
+        "comparison_mode": "segment_index_consistency",
+        "minimum_rows": 3,
+        "required_headers": [
+          "segment_number",
+          "start_seconds",
+          "end_seconds",
+          "start_time",
+          "end_time",
+          "original_text"
+        ],
+        "transcript_relative_path": "1_min_test_Video\\transcript\\transcript_original.json"
+      },
+      {
+        "name": "PROCESSING_SUMMARY.csv",
+        "relative_path": "PROCESSING_SUMMARY.csv",
+        "hash": "6df058b06409f75f514d84b83c0ed320d22e3ec9b81e5047f322863d3336067f",
+        "lines": 3
+      },
+      {
+        "name": "CODEX_MASTER_README.txt",
+        "relative_path": "CODEX_MASTER_README.txt",
+        "hash": "2f5a55deed8e8a65e7c339c42e2dd227b44738900d673d9a129c06ea73e77153",
+        "lines": 19
+      }
+    ]
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "review_warning": "Repo routing hint only. Confirm with GitHub issue lookup before creating or updating tickets.",
+  "summary": {
+    "candidate_count": 1,
+    "requires_github_review_count": 1
+  },
+  "candidates": [
+    {
+      "evidence_id": "ticket-001",
+      "suggested_issue_title": "Fix dashboard sector color",
+      "likely_target_repo": "owner/example-repo",
+      "repo_confidence": "operator_specified",
+      "repo_hint_source": "operator_target",
+      "requires_github_review": true
+    }
+  ]
+}

@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "suite_id": "canonical-long",
+  "suite_label": "Canonical Long Suite",
+  "tier": "long",
+  "description": "Longer single-video motorsport benchmark suite defined from the approved benchmark source set (long tests).",
+  "playlist_allowed": false,
+  "sources": [
+    {
+      "source_id": "en-nascar-Pc-sv-w4yeA",
+      "title": "The Evolution of Stock Car to Race Car",
+      "url": "https://www.youtube.com/watch?v=Pc-sv-w4yeA",
+      "video_id": "Pc-sv-w4yeA",
+      "expected_language": "en",
+      "suite_id": "canonical-long",
+      "tier": "long",
+      "source_type": "single-video",
+      "topic_class": "motorsport-history",
+      "embedded_english_subtitles": "native_english",
+      "notes": "English long control."
+    },
+    {
+      "source_id": "de-nuerburgring-GzcP3gciS6A",
+      "title": "Der Nurburgring - Im Hollentempo durch die Geschichte",
+      "url": "https://youtu.be/GzcP3gciS6A",
+      "video_id": "GzcP3gciS6A",
+      "expected_language": "de",
+      "suite_id": "canonical-long",
+      "tier": "long",
+      "source_type": "single-video",
+      "topic_class": "motorsport-history",
+      "embedded_english_subtitles": "unknown",
+      "notes": "German long benchmark.",
+      "expected_named_entities": [
+        {
+          "term": "Nurburgring",
+          "category": "track",
+          "expected_in_source": true,
+          "expected_in_translation": true,
+          "bad_forms": []
+        }
+      ]
+    },
+    {
+      "source_id": "fr-targa-florio-CYaZsZuc3AE",
+      "title": "VTECH : La course la plus DANGEREUSE de l'histoire ( Targa Florio )",
+      "url": "https://youtu.be/CYaZsZuc3AE",
+      "video_id": "CYaZsZuc3AE",
+      "expected_language": "fr",
+      "suite_id": "canonical-long",
+      "tier": "long",
+      "source_type": "single-video",
+      "topic_class": "motorsport-history",
+      "embedded_english_subtitles": "unknown",
+      "notes": "French long benchmark.",
+      "expected_named_entities": [
+        {
+          "term": "Targa Florio",
+          "category": "event",
+          "expected_in_source": true,
+          "expected_in_translation": true,
+          "bad_forms": []
+        }
+      ]
+    },
+    {
+      "source_id": "it-ferrari-f40-s_1I8ClUinQ",
+      "title": "FERRARI F40: La STORIA dell'indomabile di Maranello",
+      "url": "https://youtu.be/s_1I8ClUinQ",
+      "video_id": "s_1I8ClUinQ",
+      "expected_language": "it",
+      "suite_id": "canonical-long",
+      "tier": "long",
+      "source_type": "single-video",
+      "topic_class": "motorsport-history",
+      "embedded_english_subtitles": "unknown",
+      "notes": "Italian long benchmark."
+    }
+  ]
+}

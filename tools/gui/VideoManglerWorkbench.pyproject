@@ -1,0 +1,19 @@
+{
+  "files": [
+    "video_mangler_workbench_entry.py",
+    "../../src/media_manglers_workbench/__init__.py",
+    "../../src/media_manglers_workbench/__main__.py",
+    "../../src/media_manglers_workbench/app.py",
+    "../../src/media_manglers_workbench/command_builder.py",
+    "../../src/media_manglers_workbench/estimates.py",
+    "../../src/media_manglers_workbench/evidence.py",
+    "../../src/media_manglers_workbench/job_spec.py",
+    "../../src/media_manglers_workbench/metadata.py",
+    "../../src/media_manglers_workbench/prompts.py",
+    "../../src/media_manglers_workbench/resources.py",
+    "../../src/media_manglers_workbench/runner.py",
+    "../../src/media_manglers_workbench/settings.py",
+    "../../src/media_manglers_workbench/theme.py",
+    "../../src/media_manglers_workbench/widgets.py"
+  ]
+}

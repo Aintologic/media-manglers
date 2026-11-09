@@ -1,0 +1,25 @@
+{
+  "about": "Paths whose content may legitimately trip a generic privacy rule. Each entry names the generic rules it lifts for the matching files, and why. Matching is case-sensitive and '*' never crosses a '/'. Private rules can never be lifted here. tests/test_privacy_check.py pins these entries, so widening one is a visible change.",
+  "paths": [
+    {
+      "glob": "licenses/*",
+      "rules": ["email-address"],
+      "why": "Third-party license texts must keep their authors' contact addresses unchanged."
+    },
+    {
+      "glob": "THIRD_PARTY_NOTICES.txt",
+      "rules": ["email-address"],
+      "why": "Third-party notices must keep their authors' contact addresses unchanged."
+    },
+    {
+      "glob": "tools/privacy/privacy_check.py",
+      "rules": ["private-patterns-file"],
+      "why": "The checker defines the private-patterns schema name it looks for."
+    },
+    {
+      "glob": "tools/privacy/README.md",
+      "rules": ["private-patterns-file"],
+      "why": "The README shows the shape of a private-patterns file with a synthetic example."
+    }
+  ]
+}

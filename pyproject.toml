@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "media-manglers-core"
+version = "0.0.0"
+description = "Cross-platform Python core helpers for Media Manglers."
+requires-python = ">=3.10"
+
+[project.optional-dependencies]
+gui = ["PySide6>=6,<7"]
+
+[project.scripts]
+video-mangler-workbench = "media_manglers_workbench.__main__:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+# 237: the theme's drop-down arrows and tick.
+media_manglers_workbench = ["assets/*.svg", "assets/nav/*.svg"]

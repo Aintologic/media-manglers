@@ -1,0 +1,86 @@
+name: Privacy check
+
+# Keeps personal and machine-specific details out of the repository: user-profile and checkout
+# paths, computer and share names, e-mail addresses, AI chat-session links and common secrets.
+# Generic rules only; it needs no private files. See tools/privacy/README.md.
+
+on:
+  pull_request:
+  push:
+    branches: ['**']
+    tags: ['**']
+  # GitHub sends no push event when more than three tags are pushed at once, so a weekly run reads
+  # every branch and tag as well.
+  schedule:
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  privacy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Every action is pinned to the full commit of one release, named in the comment beside it. A tag
+    # such as v6 can be moved to other code at any time; a commit cannot. To update an action, look up
+    # the commit its new release tag points to and change the commit and the comment together.
+    steps:
+      # v6 keeps a pushed annotated tag as a tag object, so its message and tagger line are read.
+      - name: Check out the full history
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12'
+
+      - name: Test the privacy check
+        run: python -m unittest -v tests.test_privacy_check
+
+      # A pull request is judged by the base branch's copy of the checker and allowlist, and a push by
+      # the previous commit's copy, when that commit has one. A change to the checker therefore cannot
+      # weaken the check that judges it.
+      - name: Choose the checker
+        env:
+          JUDGE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/privacy"
+          if [ -n "$JUDGE_SHA" ] && git cat-file -e "$JUDGE_SHA:tools/privacy/privacy_check.py" 2>/dev/null \
+             && git cat-file -e "$JUDGE_SHA:tools/privacy/allowlist.json" 2>/dev/null; then
+            git show "$JUDGE_SHA:tools/privacy/privacy_check.py" > "$RUNNER_TEMP/privacy/privacy_check.py"
+            git show "$JUDGE_SHA:tools/privacy/allowlist.json" > "$RUNNER_TEMP/privacy/allowlist.json"
+            echo "Using the checker from ${JUDGE_SHA:0:12}."
+          else
+            cp tools/privacy/privacy_check.py tools/privacy/allowlist.json "$RUNNER_TEMP/privacy/"
+            echo "Using this commit's checker."
+          fi
+
+      - name: Scan every tracked file
+        run: python "$RUNNER_TEMP/privacy/privacy_check.py" tree
+
+      # An ordinary e-mail address in a commit's author or committer line is reported as a warning
+      # here, so an outside contributor is told to use a GitHub noreply address instead of failing.
+      - name: Scan everything in the pull request
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python "$RUNNER_TEMP/privacy/privacy_check.py" --identity-findings warn range "$BASE_SHA..$HEAD_SHA"
+
+      # When GitHub's old tip is not in this checkout (a new branch or tag, or a force-push), it reads
+      # everything the pushed ref reaches that the default branch does not.
+      - name: Scan everything the push added
+        if: github.event_name == 'push'
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
+          PRIVACY_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: python "$RUNNER_TEMP/privacy/privacy_check.py" --identity-findings warn ci-push --before "$BEFORE_SHA" --after "$AFTER_SHA" --ref "$GITHUB_REF"
+
+      - name: Scan every branch and tag
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: python "$RUNNER_TEMP/privacy/privacy_check.py" --identity-findings warn history

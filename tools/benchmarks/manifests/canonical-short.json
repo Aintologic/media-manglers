@@ -1,0 +1,170 @@
+{
+  "schema_version": 1,
+  "suite_id": "canonical-short",
+  "suite_label": "Canonical Short Suite",
+  "tier": "short",
+  "description": "Approved bounded single-video motorsport benchmark suite from the approved benchmark source set (short tests).",
+  "playlist_allowed": false,
+  "sources": [
+    {
+      "source_id": "en-control-1aA1WGON49E",
+      "title": "English 1-minute control",
+      "url": "https://www.youtube.com/watch?v=1aA1WGON49E",
+      "video_id": "1aA1WGON49E",
+      "expected_language": "en",
+      "suite_id": "canonical-short",
+      "tier": "short",
+      "source_type": "single-video",
+      "topic_class": "motorsport-control",
+      "embedded_english_subtitles": "native_english",
+      "notes": "English control from the approved short-test set.",
+      "expected_named_entities": []
+    },
+    {
+      "source_id": "de-brooklands-hNaUbuWL8MI",
+      "title": "Rennstrecke der Welt - Brooklands & die starken Frauen - Racing Files | GARAGENGOLD",
+      "url": "https://www.youtube.com/watch?v=hNaUbuWL8MI",
+      "video_id": "hNaUbuWL8MI",
+      "expected_language": "de",
+      "suite_id": "canonical-short",
+      "tier": "short",
+      "source_type": "single-video",
+      "topic_class": "motorsport-history",
+      "embedded_english_subtitles": "unknown",
+      "notes": "Primary Brooklands named-entity benchmark.",
+      "expected_named_entities": [
+        {
+          "term": "Brooklands",
+          "category": "track",
+          "expected_in_source": true,
+          "expected_in_translation": true,
+          "bad_forms": ["Brooklyn", "Brooklyns", "Brooklyn's"]
+        }
+      ]
+    },
+    {
+      "source_id": "de-hockenheimring-7_u8Qj78cA0",
+      "title": "Die Geschichte des Hockenheimrings - Vom Waldkurs zur modernen Rennstrecke",
+      "url": "https://www.youtube.com/watch?v=7_u8Qj78cA0",
+      "video_id": "7_u8Qj78cA0",
+      "expected_language": "de",
+      "suite_id": "canonical-short",
+      "tier": "short",
+      "source_type": "single-video",
+      "topic_class": "motorsport-history",
+      "embedded_english_subtitles": "none_known",
+      "notes": "German short B from the approved short-test set.",
+      "expected_named_entities": [
+        {
+          "term": "Hockenheimring",
+          "category": "track",
+          "expected_in_source": true,
+          "expected_in_translation": true,
+          "bad_forms": []
+        }
+      ]
+    },
+    {
+      "source_id": "fr-lemans-XRka52Y3kyA",
+      "title": "L'histoire des 24 HEURES DU MANS ◆ Trois minutes pour comprendre",
+      "url": "https://www.youtube.com/watch?v=XRka52Y3kyA",
+      "video_id": "XRka52Y3kyA",
+      "expected_language": "fr",
+      "suite_id": "canonical-short",
+      "tier": "short",
+      "source_type": "single-video",
+      "topic_class": "motorsport-history",
+      "embedded_english_subtitles": "unknown",
+      "notes": "Approved French replacement short source.",
+      "expected_named_entities": [
+        {
+          "term": "Le Mans",
+          "category": "event",
+          "expected_in_source": true,
+          "expected_in_translation": true,
+          "bad_forms": []
+        }
+      ]
+    },
+    {
+      "source_id": "ja-suzuka-WPm2N93SmTA",
+      "title": "SUPER GT Rd.5 SUZUKA GT500 final digest",
+      "url": "https://www.youtube.com/watch?v=WPm2N93SmTA",
+      "video_id": "WPm2N93SmTA",
+      "expected_language": "ja",
+      "suite_id": "canonical-short",
+      "tier": "short",
+      "source_type": "single-video",
+      "topic_class": "motorsport-race-report",
+      "embedded_english_subtitles": "unknown",
+      "notes": "Japanese short benchmark from the approved short-test set.",
+      "expected_named_entities": [
+        {
+          "term": "Suzuka",
+          "category": "track",
+          "expected_in_source": true,
+          "expected_in_translation": true,
+          "bad_forms": []
+        }
+      ]
+    },
+    {
+      "source_id": "es-velocidad-5OspljwLkDQ",
+      "title": "Que hacer y que no si entras muy rapido a una curva",
+      "url": "https://www.youtube.com/watch?v=5OspljwLkDQ",
+      "video_id": "5OspljwLkDQ",
+      "expected_language": "es",
+      "suite_id": "canonical-short",
+      "tier": "short",
+      "source_type": "single-video",
+      "topic_class": "driving-technique",
+      "embedded_english_subtitles": "unknown",
+      "notes": "Spanish short benchmark from the approved short-test set.",
+      "expected_named_entities": []
+    },
+    {
+      "source_id": "it-iracing-Xe6AgUkZmog",
+      "title": "Come frenare per andare piu forte su iRacing - Trail braking",
+      "url": "https://www.youtube.com/watch?v=Xe6AgUkZmog",
+      "video_id": "Xe6AgUkZmog",
+      "expected_language": "it",
+      "suite_id": "canonical-short",
+      "tier": "short",
+      "source_type": "single-video",
+      "topic_class": "sim-racing-technique",
+      "embedded_english_subtitles": "unknown",
+      "notes": "Italian short benchmark with explicit iRacing terminology.",
+      "expected_named_entities": [
+        {
+          "term": "iRacing",
+          "category": "product",
+          "expected_in_source": true,
+          "expected_in_translation": true,
+          "bad_forms": []
+        }
+      ]
+    },
+    {
+      "source_id": "zh-gt7-fJ7V53jFrVc",
+      "title": "2025 GT7 simulator setup review",
+      "url": "https://www.youtube.com/watch?v=fJ7V53jFrVc",
+      "video_id": "fJ7V53jFrVc",
+      "expected_language": "zh",
+      "suite_id": "canonical-short",
+      "tier": "short",
+      "source_type": "single-video",
+      "topic_class": "sim-racing-hardware",
+      "embedded_english_subtitles": "unknown",
+      "notes": "Chinese short benchmark from the approved short-test set.",
+      "expected_named_entities": [
+        {
+          "term": "GT7",
+          "category": "product",
+          "expected_in_source": true,
+          "expected_in_translation": true,
+          "bad_forms": []
+        }
+      ]
+    }
+  ]
+}

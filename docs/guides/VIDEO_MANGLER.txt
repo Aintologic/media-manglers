@@ -1,0 +1,904 @@
+Video Mangler
+=============
+
+Who it is for
+-------------
+
+Video Mangler is for video review when the pictures matter as much as the
+words.
+
+Good fits:
+
+- interviews and talks
+- presentations and training videos
+- reference review for edits
+- remote or local video that needs a cleaner package for review, handoff, or
+  LLM upload
+
+What it makes
+-------------
+
+Each completed package usually includes:
+
+- proxy\review_proxy_1280.mp4
+- frames_[interval]\frame_000001.jpg ...
+- audio\audio.mp3 when the source has readable audio
+- transcript\transcript.srt
+- transcript\transcript.json
+- transcript\transcript.txt
+- translations\<lang>\transcript.srt / .json / .txt when requested
+- comments\comments.txt / .json when requested and available from a YouTube
+  source
+- frame_index.csv
+- README_FOR_CODEX.txt
+- script_run.log
+
+Optional extras:
+
+- raw\ original source video copy
+- ai_review_package.zip
+- codex-evidence-package\ AI-reviewable candidate ticket evidence from
+  completed local recordings, including marker coverage and transcript quality
+  reporting plus optional repo/project routing hints
+- AI_REVIEW_MANIFEST.json and AI_REVIEW_README.md in each Full Review package
+  folder when the normal Full Review workflow runs
+
+For normal launched-app Full Review use, choose workflow option 1 or press
+Enter. Full Review now asks whether to include the Codex evidence package /
+ticket-capture evidence as part of the same local-source run. Pressing Enter at
+that prompt means Yes. Full Review evidence add-on runs ship without a public
+default target repo profile; use -EvidenceTargetRepo, -EvidenceRepoMapPath, or
+turn repo hints off when you want deterministic routing hints.
+
+For Full Review local-source runs, each processed video folder is the canonical
+AI review folder. It contains the normal Full Review assets,
+AI_REVIEW_MANIFEST.json, AI_REVIEW_README.md, codex-evidence-package\ when
+evidence is included, and ai_review_package.zip when requested. The output
+root still writes FULL_REVIEW_RUN_MANIFEST.json and CODEX_MASTER_README.txt,
+but those files point reviewers to each per-video folder. When an AI review zip is
+created and per-video evidence exists, it includes a compact ai_evidence\
+supplement with text handoff files, candidate metadata, frame indexes, and
+selected candidate crops when they fit under -AiReviewZipMaxMb.
+
+Full Review now transcribes every detected audio track by default. The audio\
+folder includes audio_tracks.json, audio_tracks.csv,
+transcript_source_manifest.json, per-track WAV sources under audio\tracks\, and
+a best-effort all_tracks_review_mix.wav for local inspection when the source
+has audio. The transcript\ folder includes transcript\tracks\track_NN_transcript.*,
+all_audio_tracks_transcript.md, all_audio_tracks_index.csv, and
+all_audio_tracks_manifest.json. transcript.srt/json/txt remains the combined
+review transcript, with segments labeled by track. -TranscriptAudioMode Mixed
+preserves the old first-track behavior when needed.
+
+For exact 5760x1080 sources, Full Review can create high-detail panel crops
+under frames_panels\overview_cam\, frames_panels\driver_view\, and
+frames_panels\face_cam\. The normal overview/timeline frames in frames_0p5s\
+still exist. Non-5760x1080 sources keep the existing Full Review behavior and
+record why panel crops were skipped. AI review zips include the panel
+index/manifest when present and only a size-budgeted panel image subset; the
+local Full Review folder remains the full-fidelity source.
+
+Full Review Codex evidence add-on runs now reuse the guarded Full Review
+transcript/audio when those files already exist, including all-track review-mix
+audio. Broader transcript/audio reuse is not built yet.
+
+The Full Review output root writes EVIDENCE_COVERAGE_MATRIX.csv and
+EVIDENCE_COVERAGE_MATRIX.md. These files show, per source, whether the
+transcript, AI review manifest, AI review ZIP, Codex evidence package, candidate
+tickets, and lower-confidence review-needed items were produced.
+
+For standalone evidence-only use, choose workflow option 3:
+
+  Codex evidence package / ticket capture mode
+
+Then select the local recording file or folder. The focused PreContextSeconds /
+PostContextSeconds window controls frames and the primary audio snippet. The
+separate NarrationContextPreSeconds / NarrationContextPostSeconds window is
+transcript-only, so it can preserve earlier explanations and later speech after
+driving pauses without multiplying frames or extending audio. Start review from
+EVIDENCE_QUALITY_REPORT.md, MARKER_AUDIT.md, and ALL_CANDIDATES.md. For every
+candidate, read transcript_window.md and narration_context.md; ticket.md contains
+only a shortened excerpt. If REPO_ROUTING_HINTS.md exists, treat it as a
+suggestion and confirm new-vs-existing status with GitHub issue lookup.
+
+Each candidate metadata.json records narration_context_start_seconds,
+narration_context_end_seconds, narration_context_path,
+narration_context_json_path, narration_context_segment_count,
+narration_context_pause_count,
+narration_context_has_pre_marker_explanation,
+narration_context_has_followup_after_pause,
+narration_context_boundary_type,
+narration_context_boundary_timestamp_seconds,
+narration_context_boundary_timestamp, narration_context_reached_horizon,
+narration_context_warning, and full_transcript_paths. The package manifest uses
+schema_version 2 and distinguishes candidate_count (richly rendered),
+detected_candidate_count, and unrendered_candidate_count.
+
+Source-run desktop workbench:
+
+  py -m pip install -e ".[gui]"
+  py -m media_manglers_workbench
+
+The workbench keeps Video Mangler.ps1 as the execution engine and adds a GUI for
+the existing workflow mental model:
+
+  1. Full Review
+  2. Transcript Only
+  3. Codex Evidence
+  4. Archive Catalog
+  5. Review Media Inbox
+
+Workflows 3 and 5 have dedicated in-GUI operation. Workflow 3 provides live
+processing, evidence browsing, and prompt export. Workflow 5 provides the
+one-click Review Media Inbox: choose Next 3, Up to N, or All pending, then use
+Process new media. It reconciles existing batches and external returns before
+scanning a fixed oldest-first workload, prepares sources sequentially, renders
+validated targeted-evidence requests, and finalizes completed results. The
+normal page exposes only workload, Process, cooperative Stop after current,
+queue/prompt actions, progress, and plain-English status. A genuinely ambiguous
+audio layout or disposable generated evidence may require one bounded dialog.
+Workflows 1, 2, and 4 remain available through the shared hidden-process runner.
+Workflow 3 basic controls
+include fragmented narration mode, Standard / Driving-Extended / Custom
+narration presets, profile selection, and an effective sampling/output panel.
+Advanced settings expose exact narration, frame, and render-budget values.
+
+The evidence browser loads old and new codex-evidence-package\ outputs, displays
+rendered candidates, overflow candidates, and review-needed items, and exports
+Codex, Claude Code, and machine-readable handoff files under operator-drafts\.
+Prompts require transcript_window.md, narration_context.md, shared full
+transcripts, frames, panel crops, audio, timestamps, and existing GitHub issue
+lookup. Copying prompt text does not include those local files, so the GUI warns
+the operator to make the complete package accessible to the downstream agent.
+
+Workbench settings are saved at
+%APPDATA%\MediaManglers\workbench\settings.json. Profiles are saved under
+%APPDATA%\MediaManglers\workbench\profiles\. Workbench GUI logs are saved under
+%LOCALAPPDATA%\MediaManglers\Workbench\logs. New users default output packages
+to %USERPROFILE%\Videos\Media Mangler instead of a temp-oriented folder. The
+default local input folder starts at %USERPROFILE%\Videos.
+
+Settings files use schema version 5. Profile files use schema version 2. Older
+files are merged forward, existing values and custom profiles are preserved, and
+user-edited profiles are not overwritten when built-in profiles are installed
+or refreshed.
+
+Built-in iRacing profiles:
+
+- iRacing Ticket Evidence - Balanced: visual/audio 90s before + 120s after;
+  narration 120s before + 600s after; pause 30s; stop boundary On; offsets
+  -90,-60,-45,-30,-15,-10,-5,-2,0,2,5,10,15,30,60,90,120; cadence 1s;
+  max frames 220; max fully rendered items 20; panel crops Auto.
+- iRacing Telemetry Detail: visual/audio 60s before + 90s after; narration
+  120s before + 600s after; pause 30s; stop boundary On; offsets
+  -60,-45,-30,-20,-15,-10,-5,-2,-1,0,1,2,5,10,15,30,60,90; cadence 0.5s;
+  max frames 320; max fully rendered items 10; panel crops Auto.
+- iRacing Long Explanation: visual/audio 120s before + 180s after; narration
+  180s before + 900s after; pause 30s; stop boundary On; offsets
+  -120,-90,-60,-30,-15,0,15,30,60,90,120,180; cadence 3s; max frames 140;
+  max fully rendered items 20; panel crops Auto.
+
+All three profiles enable fragmented narration mode. Full Review's 0.5-second
+timeline interval is separate from Workflow 3 evidence cadence. A 120 FPS source
+does not save 120 evidence images per second; cadence 0.5 means two extracted
+screenshots per second, subject to the max-frame cap. Exact 5760x1080 panel crops
+can add three crop images per saved full frame.
+
+The workbench does not create GitHub issues, upload to cloud services, register
+scheduled tasks, create an installer, package an exe, or replace
+Video Mangler.ps1.
+
+Full Review keeps URL support. The Codex evidence add-on is local-source only;
+remote URL Full Review runs continue to build normal packages and record the
+evidence add-on as skipped because remote-URL evidence mode is out of scope.
+
+For operator-controlled review of newly captured local videos, choose workflow
+option 5. Opening Review Media Inbox performs only lightweight reconciliation;
+it does not scan new source folders or start FFmpeg or Whisper. Choose Next 3
+(the default), Up to N, or All pending, then select Process new media. Workbench
+uses one sequential coordinator to recover existing work, import stable external
+returns, render validated targeted evidence, finalize completed results, and
+prepare the fixed new-source workload. External Codex remains responsible for
+semantic review, repository and GitHub inspection, and any operator-authorized
+issue action. Original media is never modified or deleted.
+
+The canonical queue root is the folder containing review-ledger.sqlite. Use
+Open Codex review queue or Copy Codex prompt instead of moving return files
+manually. A later launch or Process run detects stable valid returns written to
+the exact queue paths.
+
+The public repo ships only generic config examples. Put private paths, private
+project names, repo targets, custom markers, and custom domain terms in the
+local user config. Explicit CLI values override config, and config overrides
+generic defaults. Workflow 3 and Workflow 5 both read evidence.targetRepo,
+evidence.repoMapPath, evidence.customMarkers, and evidence.customDomainTerms.
+Media Manglers does not create scheduled tasks, upload to cloud services, or
+create/update GitHub issues.
+
+Codex evidence package mode uses deterministic local phrase matching, not
+semantic AI certainty. This needs to be a ticket and that needs to be a ticket
+are explicit markers. Optional voice cues improve association: same ticket,
+back to the previous ticket, and back to that ticket signal continuation; new
+ticket, another ticket, this is a separate ticket, and next ticket establish a
+new boundary; end ticket, that is all for this ticket, and done with that ticket
+close narration context. These cues are helpful but not required.
+
+For three-camera sim-racing recordings, a source evidence frame may be a
+5760x1080 composite split into three 1920x1080 panels: left = Overview Cam,
+middle = Driver View, and right = Face Cam. Codex evidence package mode
+preserves full frames and writes panel crops only when the extracted full frame
+is exactly 5760x1080. Follow each crop's recorded purpose and expected-evidence
+metadata; do not assume the Driver View always contains dashboard UI. Use a
+local EvidencePanelRoleMapPath when a dedicated dashboard-monitor crop or
+project/profile-specific role mapping is needed. Use Overview Cam for whole-scene
+context and the Face Cam crop mostly for speaker or gesture context. Do not
+judge small UI text from a downsampled preview when full or panel crops exist.
+
+For raw local video folders that may later move to cold storage, choose
+workflow option 4:
+
+  Archive catalog / Glacier prep index
+
+This writes a searchable hot catalog under _ARCHIVE_CATALOG\ in the selected
+output folder unless -ArchiveCatalogPath is provided. The archive workflow
+creates SQLite, CSV, JSONL, integrity, upload-prep, restore-index, skipped-path,
+error, manual-notes, thumbnail/contact-sheet, and sidecar files. It does not
+upload to AWS, execute Glacier restores, force Whisper transcription, or perform
+semantic AI routing.
+
+Fast hash mode is deliberately honest. The default -ArchiveHashMode Fast records
+catalog identity, file size, mtime, and path metadata but does not claim full
+content verification. archive_manifest.sha256.txt only contains verified
+SHA-256 rows when -ArchiveHashMode Full computed a real full-file hash.
+
+Because transcripts and AI summaries are not default for raw archive folders,
+manual_notes_template.csv is part of the workflow. Review contact sheets, fill
+manual_title, manual_notes, manual_tags, game, track, car, session_type,
+visible_apps, and issue_keywords, then import the CSV with -ArchiveNotesCsv.
+Archive search matches those manual fields so searches like Spa Ferrari GT3 can
+find the likely restore candidate.
+
+Packaged runs
+-------------
+
+Use the versioned ZIP bundle in dist\release as the normal handoff to another
+machine. The package now carries the app, the tracked python-core helper
+sidecar, and the Hybrid protected-terms profile assets stored under
+glossaries\ together.
+
+The loose EXE in dist\bin is still useful for local build checks, but it is not
+meant to be copied away by itself and treated as a fully standalone Hybrid
+package. Keep the loose EXE beside its sidecar folders if you use that surface.
+
+How translation works
+---------------------
+
+Video Mangler now uses a source-audio-first translation flow.
+
+That means it does this:
+
+1. Extract the source audio.
+2. Create the original-language transcript from that source audio.
+3. If you request translation, create translated transcript files from that
+   original spoken source.
+
+This is especially useful for remote video. If a YouTube video has poor
+platform-translated audio or captions, Video Mangler is meant to prefer the
+original spoken source instead.
+
+For YouTube links, the app now probes the available audio-track metadata before
+the final download when YouTube exposes it. If multiple spoken-language tracks
+are available, interactive runs show a track picker and recommend the
+original/source audio. NoPrompt runs try to choose that original/source track
+automatically and log best-effort wording when the provider metadata does not
+confirm it clearly.
+
+Mode choices:
+
+- Local mode: local transcription plus local translation
+- AI Private: OpenAI transcription plus OpenAI text translation when translation
+  is actually needed
+- AI Public: local transcription plus OpenAI translation on the Public/shared
+  project
+- Hybrid: local transcription first, then OpenAI text-only English translation
+
+That difference matters. AI Public does not behave the same way as AI Private,
+and AI Public does not imply that source audio is uploaded to OpenAI for
+transcription.
+
+If the detected source language already matches the requested target language,
+the app now copies the original transcript into translations\<lang>\ and skips
+the OpenAI text-translation call. In AI Private, that still allows OpenAI
+transcription when the chosen mode requires it.
+
+Local translation paths:
+
+- to English: can use Whisper locally
+- to other target languages: can use Argos Translate when the language packages
+  are installed
+
+Interactive Local runs now ask which Whisper model to use. The beginner-friendly
+default on Enter is medium, and the prompt shows small, medium, and large with
+rough CPU-only transcription-time tradeoffs so operators are not surprised by
+the Local runtime cost. Scripted or -NoPrompt Local runs still keep the current
+accuracy-first default of large unless you explicitly pass -WhisperModel.
+
+Interactive translation now asks:
+
+  Translate the transcript into another language? (Y/n):
+
+If you answer Yes or just press Enter, the next prompt asks for the target
+language code and defaults to en on Enter.
+
+Local Whisper no longer uses one fixed wall-clock timeout for every run. Before
+a Local Whisper run starts, Video Mangler now logs the source duration, chosen
+model, whether the Local path looks CPU-only or GPU-capable, audio track count
+when known, resolved transcript mode, effective transcription workload, the
+advisory estimated transcription duration, the hard runtime budget, and the
+separate stall watchdog. If an active helper exceeds the advisory estimate,
+the run keeps going and progress changes to over-estimate time plus
+hard-budget remaining time. Very long interactive Local runs offer a simple
+continue/switch-smaller/cancel prompt that auto-continues with the
+current/default model after -PromptTimeoutSeconds, while -NoPrompt runs stay
+non-interactive. You can still force a manual hard runtime budget with
+-WhisperTimeoutSeconds when needed.
+
+If translation is requested and you explicitly choose an English-only Whisper
+model, the app explains the issue clearly and tells you to switch to a
+multilingual model.
+
+Console output
+--------------
+
+Normal runs now keep the console focused on the current phase, short progress
+updates, heartbeats, and the final PASS/WARN/FAIL summary. Full command lines,
+raw helper chatter, and low-level troubleshooting detail still go to
+script_run.log.
+
+Use -DebugMode when you want that deep detail streamed to the console too.
+
+OpenAI API key setup
+--------------------
+
+Create the key in your OpenAI Platform account:
+
+  https://platform.openai.com/api-keys
+
+Current OpenAI paths in code:
+
+- AI model selection can query GET /v1/models to see which repo-approved
+  models are visible to the selected key/project.
+- AI translation uses POST /v1/chat/completions
+- AI Private transcription uses POST /v1/audio/transcriptions
+
+How model selection works:
+
+- The script does not pick from every model a key can see.
+- It first checks which models are visible to the selected key/project.
+- It then chooses only from a repo-approved allowlist for the current mode.
+- AI Public translation is intentionally pinned to a small approved Public
+  list: gpt-4o-mini-2024-07-18 first, then gpt-4.1-mini-2025-04-14.
+- AI Private translation uses a separate approved preference list. Right now
+  it prefers gpt-5-mini and only falls back to other approved lower-cost
+  models if that Private key/project cannot use the first choice.
+- AI Private transcription keeps the current approved transcription model:
+  whisper-1.
+- If discovery succeeds, the script auto-selects the first visible approved
+  model for the chosen mode/project.
+- If discovery is skipped or only fails with network / timeout / server-style
+  errors, current main can still fall back to an approved explicit model or an
+  approved default model.
+- If discovery fails because of auth, permissions, quota, or because no
+  approved model is visible, the run stops instead of silently guessing.
+- -OpenAiModel is optional. If you set it, it must still be approved for the
+  chosen mode/project. When discovery succeeds, it must also be visible to
+  that key/project.
+
+Recommended setup for normal local use:
+
+- Create the key in your OpenAI Platform account.
+- Choose Owned by you.
+- Put Media Manglers in a dedicated project.
+- Choose Restricted.
+- In the current OpenAI Platform UI, turn on Request for Chat Completions
+  (/v1/chat/completions).
+- For AI Private, also turn on Request permission for audio transcription
+  access because Private AI mode sends source audio to OpenAI for
+  transcription.
+- Leave unrelated permissions like Images, Embeddings, Files, Fine-tuning,
+  Vector Stores, Assistants, Batches, and similar extras off or set to None
+  unless you actually use them.
+- Read Only is not enough because Video Mangler sends POST
+  /v1/chat/completions requests for translation.
+- Service accounts are mainly for shared automation, servers, CI, or other
+  non-personal bot identities, not normal desktop use.
+- ChatGPT subscriptions and OpenAI API billing are separate.
+- OpenAI translation needs API billing/credits on the selected OpenAI Platform
+  project.
+- OpenAI API usage may incur charges.
+- Private is the default and safest key profile.
+- If you want a Private/Public split, create two separate OpenAI Platform
+  projects and one key per project.
+- Use OPENAI_API_KEY_PRIVATE for the default Private path.
+- Use OPENAI_API_KEY_PUBLIC only when you explicitly run -ProcessingMode AI
+  -OpenAiProject Public.
+- OPENAI_API_KEY still works as a legacy Private fallback for older setups.
+- The script cannot infer whether a pasted key is Private or Public.
+- Use Private for confidential, sensitive, internal, client, or proprietary
+  media. If you are unsure, use Private.
+- Use Public only for media you are allowed to share with OpenAI.
+- Public/shared complimentary tokens only apply when the Public project is
+  configured for shared traffic and the request uses an eligible model.
+- Public mode will not auto-upgrade itself to broader or more expensive models
+  just because the key can see them.
+- If a request would cross the remaining complimentary daily quota, OpenAI
+  bills the whole request normally.
+
+Ways to provide the key on Windows:
+
+- Paste it at the prompt for the current run only.
+- Current PowerShell session:
+
+  $env:OPENAI_API_KEY_PRIVATE="sk-..."
+
+- Public project session:
+
+  $env:OPENAI_API_KEY_PUBLIC="sk-..."
+  powershell -NoProfile -ExecutionPolicy Bypass -File '.\Video Mangler.ps1' -TranslateTo en -ProcessingMode AI -OpenAiProject Public
+
+- Legacy fallback:
+
+  $env:OPENAI_API_KEY="sk-..."
+
+- Persistent Windows user variable:
+
+  [System.Environment]::SetEnvironmentVariable("OPENAI_API_KEY_PRIVATE","sk-...","User")
+
+After setting the persistent user variable, open a new PowerShell window before
+rerunning the app. Do not hardcode the key in the script or commit it to GitHub.
+
+Optional troubleshooting:
+
+- Set MM_OPENAI_DIAGNOSTICS=1 to write per-segment OpenAI diagnostics into an
+  openai_diagnostics folder inside the output package.
+- Leave MM_OPENAI_DIAGNOSTICS unset during normal runs.
+- Video Mangler includes a verified Windows PowerShell 5.1 compatibility fix for
+  non-ASCII transcript text on the OpenAI path.
+
+Examples
+--------
+
+Single local file:
+
+  C:\Videos\clip.mp4
+
+Local folder:
+
+  C:\Videos\session-exports
+
+Approved bounded remote smoke video examples:
+
+  https://www.youtube.com/watch?v=1aA1WGON49E
+  https://www.youtube.com/watch?v=hNaUbuWL8MI
+  https://www.youtube.com/watch?v=XRka52Y3kyA
+
+Command-line summary
+--------------------
+
+Current main behavior:
+
+- ProcessingMode is the primary operator-facing switch.
+- If you do not pass -ProcessingMode, Video Mangler defaults to Local.
+- If you do not explicitly pass -WhisperModel and the resolved mode is Local,
+  interactive runs prompt for small, medium, or large and default to medium on
+  Enter. -NoPrompt and other scripted Local runs still keep the current large
+  default unless you set -WhisperModel yourself.
+- -OpenAiProject Private = OpenAI transcription + OpenAI translation in AI
+  mode, or private-project text-only translation in Hybrid.
+- -OpenAiProject Public = local transcription + OpenAI translation on the
+  Public/shared project in AI mode, or Public/shared-project text-only
+  translation in Hybrid.
+- Hybrid defaults to generic mode with no Protected Terms Profile selected.
+  Use -ProtectedTermsProfile sim-racing only when you intentionally want that
+  seeded domain profile.
+- Remote playlist or larger multi-item expansions now pause for a scope review
+  before the real run starts. Use -ApproveExpandedRun for reviewed scripted
+  runs.
+- -NoPrompt disables the interactive questions and uses the non-interactive
+  defaults.
+- -Version and -ShowVersion are aliases for the same version-only path.
+
+Parameters:
+
+- -InputPath / -InputUrl: local video file/folder or a direct/page/YouTube
+  URL. If omitted, interactive runs ask and non-interactive runs scan
+  -InputFolder.
+- -InputFolder: default scan/cache root when -InputPath is omitted. Default:
+  Media Mangler\_VIDEO_INPUT inside your own Videos folder (the one Windows
+  reports, so it follows a move to OneDrive or another drive).
+- -OutputFolder: root folder for output packages and logs. Default:
+  Media Mangler\_VIDEO_OUTPUT inside your own Videos folder. A temp folder is
+  refused: the Windows temp folder, or any folder inside a folder named Temp
+  or Tmp (for example C:\TEMP), because it can be emptied without warning.
+- -FFmpegPath: the ffmpeg.exe to use. Default: none; FFmpeg is looked for on
+  PATH, then in its own install folders (the Windows Package Manager folders).
+  When it is not found, the message gives the official page and the winget
+  command (winget install --id Gyan.FFmpeg -e).
+- -PythonExe: override the Python launcher used for Whisper, Argos, and the
+  yt-dlp module fallback. Default: py.
+- -YtDlpPath: override the yt-dlp command/path used for remote inputs.
+  Default: yt-dlp.
+- -WhisperModel: choose the local Whisper model. Literal script default:
+  base.en. Interactive Local runs now prompt for small, medium, or large and
+  default to medium on Enter. Non-interactive Local runs still default to
+  large when you do not explicitly set the parameter.
+- -Language: optional source-language hint for transcription and local
+  translation. Leave blank to auto-detect when possible.
+- -TranslateTo: comma-separated target language codes such as en or en,es.
+  Blank means no translated transcript outputs in scripted runs. Interactive
+  runs now ask a yes/no question first and default the follow-up target-code
+  prompt to en.
+- -ProcessingMode: primary mode switch. Valid values: Local, AI, Hybrid.
+  Default: Local.
+- -TranslationProvider: legacy compatibility flag. Valid values: Auto,
+  OpenAI, Local. Current main maps it into ProcessingMode; new runs should
+  prefer -ProcessingMode.
+- -OpenAiModel: optional OpenAI translation model request. Explicit values
+  must be repo-approved for the chosen mode/project and, when discovery
+  succeeds, visible to that key/project.
+- -ProtectedTermsProfile: optional Hybrid-only protected-terms profile
+  selection. Leave it blank for generic mode, or use sim-racing when you
+  intentionally want the seeded sim-racing profile.
+- -DebugMode: stream helper chatter, command lines, and other troubleshooting
+  detail to the console. Normal mode keeps that detail in script_run.log.
+- -OpenAiProject: valid values: Private, Public. Default: Private when AI or
+  Hybrid mode is used. Ignored in Local mode.
+- -FrameIntervalSeconds: extract one frame every N seconds. Real default: 0.5.
+  Interactive runs prompt with 0.5 as the default; -NoPrompt runs take 0.5
+  automatically.
+- -TranscriptOnly: build transcript-only outputs for local video files/folders
+  under transcript-only\.
+- -CodexEvidencePackage: build a post-processing-only AI review package under
+  codex-evidence-package\ with likely ticket moments, transcript windows,
+  marker audit reports, repo/project routing hints, visual frames, audio
+  snippets, and Markdown/JSON handoff files. This mode is
+  available from workflow option 3 when launching Video Mangler normally, and
+  it does not require interaction while driving or recording. Evidence mode
+  extracts working audio before Local Whisper transcription instead of
+  transcribing raw video directly.
+- -IncludeCodexEvidencePackage: include the existing Codex evidence package
+  builder as a per-video Full Review add-on for local Full Review sources.
+  Interactive Full Review runs ask and default to Yes.
+- -SkipCodexEvidencePackage: disable the Full Review Codex evidence add-on and
+  keep the old Full Review-only path.
+- -TranscriptOnlyRecurse: scan subfolders for local transcript-only or Codex
+  evidence package runs.
+- -OverwriteTranscripts: rebuild existing transcript files in local
+  transcript-only or Codex evidence package runs.
+- -PreContextSeconds: focused visual/audio evidence before the marker.
+  Default: 120.
+- -PostContextSeconds: focused visual/audio evidence after the marker.
+  Default: 240.
+- -NarrationContextPreSeconds: longer transcript-only narration before the
+  marker. Default: 120.
+- -NarrationContextPostSeconds: longer transcript-only narration after the
+  marker. Default: 600.
+- -NarrationPauseThresholdSeconds: silence shown as a driving pause in
+  narration context. Default: 30.
+- -NarrationStopAtNextTicketBoundary: On or Off. Stop before the next explicit
+  ticket boundary. Default: On.
+- -FragmentedNarrationMode: On or Off. Preserve longer transcript-only context
+  without adding screenshots or extending primary audio. Default: On.
+- -EvidenceFrameOffsets: Codex evidence package frame offsets, in seconds
+  relative to the marker. Default: -60,-30,0,30,90,120.
+- -EvidenceAudioStreamIndex: Codex evidence package audio stream ordinal for
+  extracted transcription audio. Default: 0. All detected streams are logged
+  and recorded in manifest.json and EVIDENCE_QUALITY_REPORT.md.
+- -EvidenceAudioStreamSelectionConfirmed: record that the selected stream was
+  intentionally chosen as operator narration. Without confirmation, a
+  multi-stream source is reported as uncertain.
+- -EvidencePreserveSupportingAudio: extract parallel candidate snippets from
+  non-narration streams as supporting evidence without using them for ticket
+  detection.
+- -EvidenceFrameCadenceSeconds: Codex evidence package frame sampling cadence
+  inside each candidate window. Default: 10.
+- -EvidenceMaxFramesPerCandidate: Codex evidence package frame cap per
+  candidate. Default: 60.
+- -EvidenceMaxItems: maximum candidates to fully render with frame/audio
+  evidence. Default: 50. Overflow detections remain in ALL_CANDIDATES.md/json.
+- -EvidenceRenderCandidateIds: optional stable IDs such as
+  ticket-021,ticket-024 to richly render on a later run.
+- -EvidencePanelCrops: controls derived 5760x1080 panel crops for evidence
+  frames. Valid values: Auto, On, Off. Default: Auto. Auto/On split only exact
+  5760x1080 frames into overview_cam, driver_view, and face_cam.
+- -FullReviewPanelCrops: controls high-detail Full Review panel crops for
+  exact 5760x1080 sources. Valid values: Auto, On, Off. Default: Auto.
+- -FullReviewPanelCropCadenceSeconds: Full Review panel crop cadence in
+  seconds. Default: 5.
+- -AiReviewZipPanelCropMode: controls Full Review panel evidence in
+  ai_review_package.zip. Valid values: Auto, Off, IndexOnly, Selected.
+  Default: Auto. Index/manifest are included when present, and images are
+  size-budgeted. Legacy alias: -ChatGptZipPanelCropMode.
+- -TranscriptAudioMode: selects the transcript audio source. Valid values:
+  Auto, All, Prompt, Mixed, Track. Default: Auto, which resolves to All and
+  transcribes every detected audio track for Full Review. Use Mixed for the
+  previous first-audio-stream behavior, or Track with an explicit stream/track
+  selector.
+- -TranscriptAudioStream: explicit transcript audio stream, such as 0:a:1,
+  a:1, or absolute stream 0:2.
+- -TranscriptAudioTrackOrdinal: explicit VLC-style transcript track number.
+  Track 2 maps to audio ordinal a:1 only when ffprobe confirms that for the
+  source file.
+- -PreferredTranscriptAudioTrackOrdinal: preferred VLC-style track number used
+  by Auto mode when present.
+- -AudioTrackAudit: print and log the detected audio track inventory.
+- -EvidenceTargetRepo: optional owner/repo routing hint applied to all evidence
+  candidates, for example example-org/example-project. This is only a
+  hint and must be confirmed during GitHub review.
+- -EvidenceRepoMapPath: optional JSON keyword map for deterministic local
+  repo/project hints. See docs/examples/evidence_repo_hints.example.json.
+- -EvidenceRepoHintMode: repo hint behavior for evidence packages. Valid
+  values: auto, target-only, off. Default: auto.
+- -EvidenceCustomMarkers: add local custom candidate marker phrases for this
+  run. Prefer local config for private project terms.
+- -EvidenceCustomDomainTerms: add local custom review-needed domain terms for
+  this run. Prefer local config for private project terms.
+- -EvidenceTranscriptionGlossaryPath: optional local JSON glossary containing
+  application/profile/project canonical terms and exact aliases.
+- -EvidenceTranscriptionGlossaryEntries: profile-friendly compact entries in
+  Canonical=Alias One|Alias Two form. Corrected text drives Workflow 3 while
+  raw transcript files remain under transcript\raw.
+- -EvidencePanelRoleMapPath: optional local JSON crop-role map with purpose,
+  expected evidence type, and crop geometry.
+- -EvidenceTargetProject, -EvidenceApplicationVersion,
+  -EvidenceProfileSetupName, -EvidenceDashboardRevision,
+  -EvidenceTestConditions, and -EvidenceConfigurationNotes: optional local run
+  metadata recorded with candidates and agent handoff.
+- -ReviewNewVideos: compatibility switch for Workflow 5. -ReviewMediaInbox is
+  the preferred alias. A headless invocation without -ReviewInboxAction keeps
+  the safe legacy default of Scan. Workbench explicitly requests Process.
+- -ReviewInboxAction: Workflow 5 action. Process is the normal one-click
+  coordinator. Scan, Prepare, TargetedEvidence, ImportResults,
+  PreviewFinalization, and Finalize remain advanced compatibility stages for
+  existing CLI consumers.
+- -ReviewInboxWorkload: Process workload. Exact values are next_3 (default),
+  up_to_n, and all_pending. All pending builds a fixed snapshot and requires a
+  workload confirmation before new-source preparation.
+- -ReviewInboxNewSourceLimit: positive Process limit for up_to_n, from 1 through
+  9999. Workbench defaults this control to 10.
+- -ReviewInboxExactSourcePathsJson: optional advanced, run-scoped Process
+  restriction for qualification and acceptance work. Process still completes
+  the normal configured-folder scan first, then requires every supplied
+  absolute path to be an eligible result inside the configured source and
+  recurse boundary. It builds the fixed snapshot only from those matches,
+  records their scanned identities in the run journal, and fails closed
+  without preparing another source if any match is missing or unsafe. Duplicate
+  paths are deduplicated. The restriction cannot be combined with all_pending
+  or exceed the selected workload limit. If Fast scanning would need a complete
+  hash for a different source because of prior ledger identity, the restricted
+  run stops instead of reading that source completely. Workbench accepts the equivalent
+  repeatable --review-inbox-exact-source launch argument; neither form is saved
+  as an ordinary default or profile value.
+- -ReviewInboxContinuation and -ReviewInboxDecisionJson: opaque continuation
+  and token-bound decision returned through MM_REVIEW_INBOX_PROCESS_RESULT_V1.
+  Workbench owns these during the normal path; do not invent their contents.
+- -ReviewSourceFolders: override reviewMediaInbox.sourceFolders from local
+  config for this run. Legacy reviewNewVideos configuration remains a fallback.
+- -ReviewEvidenceRoot: override where kept Workflow 5 evidence packages and
+  the default ledger are stored.
+- -ReviewLocalWorkRoot: override the temporary Workflow 5 local copy/work root.
+- -ReviewLedgerPath: override the Workflow 5 SQLite ledger path.
+- -ReviewDedupeMode: Workflow 5 duplicate mode. Valid values: Fast, Full.
+  Default: config value or Fast. Full can read multiple terabytes and requires
+  the explicit per-run -ReviewFullScanAcknowledged warning acknowledgement.
+- -ReviewNoRecurse: disable recursive scanning for Workflow 5 source folders.
+- -ReviewAudioConfirmationsPath: local exact-layout confirmation store used when
+  an ambiguous source requires the microphone-track dialog.
+- -ReviewStopAfterCurrentFilePath: cooperative stop signal used by Process.
+  When the signal appears, the current source or targeted request finishes
+  safely and no next operation starts.
+- -ReviewInboxOrder, -ReviewInboxMaxFiles, -ReviewInboxMaxDurationMinutes,
+  -ReviewInboxConcurrency, and -ReviewInboxPendingBatchLimit: retained for
+  legacy Scan/Prepare compatibility. Normal Process fixes oldest-first ordering,
+  hidden batches of at most three, a 240-minute soft source boundary, and one
+  local media operation at a time. Batches merely waiting for Codex do not
+  consume the Process new-source budget or block another safe local batch.
+- -ArchiveCatalog: build/update a standalone archive catalog and Glacier prep
+  index for local raw video files/folders. The workflow scans supported video
+  extensions, respects _NO_GLACIER_BACKUP, writes _ARCHIVE_CATALOG\, and never
+  uploads to AWS.
+- -ArchiveCatalogSearch: search an existing archive catalog.
+- -ArchiveSearchTerms: terms for -ArchiveCatalogSearch, for example
+  Spa Ferrari GT3.
+- -ArchiveSkipMarker: folder marker that skips that folder and all descendants.
+  Default: _NO_GLACIER_BACKUP.
+- -ArchiveHashMode: archive hash behavior. Valid values: Fast, Full, Off.
+  Default: Fast. Fast never emits fake SHA-256 claims.
+- -ArchiveThumbnailMode: thumbnail/contact-sheet behavior. Valid values:
+  Auto, Off. Default: Auto.
+- -ArchiveMaxThumbnailsPerVideo: sparse thumbnail cap per video. Default: 12.
+- -ArchiveS3Bucket / -ArchiveS3Prefix: optional prep-manifest values only. No
+  upload is performed.
+- -ArchiveCatalogPath: optional catalog folder override. Default:
+  _ARCHIVE_CATALOG\ under -OutputFolder.
+- -ArchiveNotesCsv: import manual notes/tags into SQLite, exports, restore
+  index, and search.
+- -ArchiveExportNotesTemplate: export/update the manual notes template from the
+  current catalog.
+- -HeartbeatSeconds: how often long-running steps log progress. Default: 10.
+- -WhisperTimeoutSeconds: optional explicit Local Whisper hard runtime-budget
+  override in seconds. Leave it unset to use the adaptive hard
+  runtime-budget logic.
+- -PromptTimeoutSeconds: seconds to wait before defaulting routine interactive
+  prompts such as workflow selection, mode/model choices, copy/zip/open
+  defaults, comments defaults, archive defaults, and the Local Whisper runtime
+  warning. Default: 60. Use 0 to disable timed defaults.
+- -CopyRawVideo: copy the original source video into the package raw folder.
+  CLI default: off. Interactive default on Enter: Yes.
+- -IncludeComments: request YouTube comments when the source supports them.
+  CLI default: off. Interactive YouTube default on Enter: Yes.
+- -CreateAiReviewZip: build ai_review_package.zip for each completed package.
+  CLI default: off. Interactive default on Enter: Yes. Legacy alias:
+  -CreateChatGptZip.
+- -KeepTempFiles: keep temporary working files and download caches instead of
+  cleaning them up. Default: off.
+- -OpenOutputInExplorer: open the output folder in Windows Explorer when the
+  run finishes. CLI default: off. Interactive default on Enter: Yes.
+- -NoPrompt: disable interactive questions and use the non-interactive
+  defaults described above.
+- -ApproveExpandedRun: allow a reviewed expanded remote run to continue in
+  non-interactive mode after the playlist/large-batch scope summary.
+- -SkipEstimate: skip the runtime estimate stage. Default: off.
+- -Version / -ShowVersion: print the app version and exit.
+- -AiReviewZipMaxMb: maximum AI review ZIP size in MB. Default: 500. Legacy
+  alias: -ChatGptZipMaxMb.
+
+Example commands:
+
+- Show the version:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File '.\Video Mangler.ps1' -Version
+
+- Local review package with the current accuracy-first default and no prompts:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File '.\Video Mangler.ps1' -InputPath 'C:\Videos\session' -OutputFolder 'C:\Reviews\Video' -TranslateTo en -NoPrompt
+
+- AI Private remote video run:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File '.\Video Mangler.ps1' -InputUrl 'https://www.youtube.com/watch?v=XRka52Y3kyA' -TranslateTo en -ProcessingMode AI -OpenAiProject Private -NoPrompt
+
+- AI Public run with an explicit approved translation model and comments:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File '.\Video Mangler.ps1' -InputUrl 'https://www.youtube.com/watch?v=hNaUbuWL8MI' -TranslateTo en -ProcessingMode AI -OpenAiProject Public -OpenAiModel gpt-4.1-mini-2025-04-14 -IncludeComments -NoPrompt
+
+- Custom frame interval plus AI review ZIP output:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File '.\Video Mangler.ps1' -InputPath 'C:\Videos\lap.mp4' -FrameIntervalSeconds 1.0 -CreateAiReviewZip -NoPrompt
+
+- Full Review with Codex evidence included for local recordings:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File '.\Video Mangler.ps1' -InputPath 'C:\Videos\session' -OutputFolder 'C:\Reviews\Video' -IncludeCodexEvidencePackage -WhisperModel medium -NoPrompt
+
+- Full Review with explicit transcript audio track audit and panel crops:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File '.\Video Mangler.ps1' -InputPath 'C:\Videos\session\lap.mkv' -OutputFolder 'C:\Reviews\Video' -FullReviewPanelCrops Auto -TranscriptAudioMode Track -TranscriptAudioTrackOrdinal 2 -AudioTrackAudit -CreateAiReviewZip -NoPrompt
+
+- Full Review with Codex evidence disabled:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File '.\Video Mangler.ps1' -InputPath 'C:\Videos\session' -OutputFolder 'C:\Reviews\Video' -SkipCodexEvidencePackage -NoPrompt
+
+- Codex evidence package from completed local recordings:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File '.\Video Mangler.ps1' -InputPath 'C:\Videos\recorded-session' -OutputFolder 'C:\Reviews\Video' -CodexEvidencePackage -WhisperModel medium -PreContextSeconds 90 -PostContextSeconds 120 -NarrationContextPreSeconds 120 -NarrationContextPostSeconds 600 -NarrationPauseThresholdSeconds 30 -NarrationStopAtNextTicketBoundary On -FragmentedNarrationMode On -EvidenceFrameOffsets '-90,-60,-45,-30,-15,-10,-5,-2,0,2,5,10,15,30,60,90,120' -EvidenceFrameCadenceSeconds 1 -EvidenceMaxFramesPerCandidate 220 -EvidenceMaxItems 20 -EvidencePanelCrops Auto -NoPrompt
+
+- Review Media Inbox normal Process path with the default Next 3 workload:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File '.\Video Mangler.ps1' -ReviewMediaInbox -ReviewInboxAction Process -ReviewInboxWorkload next_3 -ReviewDedupeMode Fast -NoPrompt
+
+- Review Media Inbox Process path with an Up to 10 workload:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File '.\Video Mangler.ps1' -ReviewMediaInbox -ReviewInboxAction Process -ReviewInboxWorkload up_to_n -ReviewInboxNewSourceLimit 10 -ReviewDedupeMode Fast -NoPrompt
+
+- Advanced restricted qualification of one exact scanned source:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File '.\Video Mangler.ps1' -ReviewMediaInbox -ReviewInboxAction Process -ReviewInboxWorkload next_3 -ReviewInboxExactSourcePathsJson '["C:\\Media\\approved-source.mkv"]' -ReviewDedupeMode Fast -NoPrompt
+
+- Advanced compatibility metadata scan (-ReviewNewVideos remains compatible):
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File '.\Video Mangler.ps1' -ReviewMediaInbox -ReviewInboxAction Scan -ReviewDedupeMode Fast -ReviewInboxMaxFiles 3 -ReviewInboxMaxDurationMinutes 240 -ReviewInboxConcurrency 1 -ReviewInboxPendingBatchLimit 1 -NoPrompt
+
+- Advanced compatibility bounded preparation:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File '.\Video Mangler.ps1' -ReviewMediaInbox -ReviewInboxAction Prepare -ReviewDedupeMode Fast -ReviewInboxOrder Oldest -ReviewInboxMaxFiles 3 -ReviewInboxMaxDurationMinutes 240 -ReviewInboxConcurrency 1 -ReviewInboxPendingBatchLimit 1 -NoPrompt
+
+- Advanced compatibility targeted evidence for an accepted preliminary submission:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File '.\Video Mangler.ps1' -ReviewMediaInbox -ReviewInboxAction TargetedEvidence -ReviewInboxResumeBatchId '<batch-id>' -ReviewPreliminarySubmissionSha256 '<64-character-sha256>' -NoPrompt
+
+- Advanced compatibility final-results import:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File '.\Video Mangler.ps1' -ReviewMediaInbox -ReviewInboxAction ImportResults -ReviewInboxResumeBatchId '<batch-id>' -ReviewResultsPath '<path-to-review-results.json>' -NoPrompt
+
+- Advanced compatibility finalization preview:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File '.\Video Mangler.ps1' -ReviewMediaInbox -ReviewInboxAction PreviewFinalization -ReviewInboxResumeBatchId '<batch-id>' -NoPrompt
+
+- Advanced compatibility execution of an explicitly approved preview:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File '.\Video Mangler.ps1' -ReviewMediaInbox -ReviewInboxAction Finalize -ReviewInboxResumeBatchId '<batch-id>' -ReviewFinalizationPlanPath '<plan-path>' -ReviewFinalizationPlanSha256 '<64-character-sha256>' -ReviewFinalizationConfirmed -NoPrompt
+
+  The 240-minute value is a soft source boundary, not a hard wall-clock cutoff.
+  Full mode hashes the complete stable inventory and requires
+  -ReviewFullScanAcknowledged on every run. A completed batch includes a review
+  README, Codex prompt, and preliminary-findings schema/template. Process
+  automatically detects and validates stable preliminary and final returns,
+  renders integrity-checked targeted evidence, resumes interrupted work, and
+  finalizes through the existing crash-safe journal. The primary Workbench page
+  does not require manual stage commands, JSON browsing, or file imports. Media
+  Manglers never performs semantic issue decisions and never modifies original
+  media.
+
+- Archive catalog / Glacier prep index:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File '.\Video Mangler.ps1' -InputPath 'C:\Videos\raw-archive' -OutputFolder 'C:\Reviews\Archive' -ArchiveCatalog -ArchiveHashMode Fast -ArchiveThumbnailMode Auto -ArchiveMaxThumbnailsPerVideo 12 -NoPrompt
+
+- Search an archive catalog:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File '.\Video Mangler.ps1' -OutputFolder 'C:\Reviews\Archive' -ArchiveCatalogSearch -ArchiveSearchTerms 'Spa Ferrari GT3' -NoPrompt
+
+- Import manual notes/tags:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File '.\Video Mangler.ps1' -OutputFolder 'C:\Reviews\Archive' -ArchiveCatalog -ArchiveNotesCsv 'C:\Reviews\Archive\_ARCHIVE_CATALOG\manual_notes_template.csv' -NoPrompt
+
+Archive catalog output tree:
+
+  _ARCHIVE_CATALOG\
+    archive_catalog.sqlite
+    archive_catalog.csv
+    archive_catalog.jsonl
+    archive_integrity_manifest.csv
+    archive_manifest.sha256.txt
+    archive_upload_manifest.csv
+    archive_restore_index.md
+    archive_batch_manifest.json
+    skipped_paths.csv
+    errors.csv
+    manual_notes_template.csv
+    manual_notes_import_report.csv
+    thumbnails\<video-id>\thumb_0001.jpg
+    contact_sheets\<video-id>_contact_sheet.jpg
+    sidecars\<video-id>.json
+
+Validation
+----------
+
+Smoke test:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\smoke\Run-SmokeTest.ps1
+
+Translation smoke test:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\smoke\Run-SmokeTest.ps1 -TranslateTo en -ProcessingMode Local
+
+Validator:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\validation\Validate-VideoToCodexPackage.ps1 -FrameIntervalSeconds 0.5
+
+Run-SmokeTest.ps1 now prefers short local fixtures under AREA51\TestData before
+it falls back to the approved bounded remote set, starting with the
+English `1aA1WGON49E` clip.
+
+Run-SmokeTest.ps1 now prefers the short local fixture
+AREA51\TestData\1_min_test_Video.mp4 when that local-only helper file exists,
+before it falls back to test_media or the older remote sample URL.
+
+Notes
+-----
+
+- Local mode keeps transcription and translation on your machine after its
+  dependencies are installed.
+- AI Private sends source audio plus transcript/translation content to OpenAI.
+- AI Public keeps transcription local and only sends transcript/translation
+  content to the Public/shared OpenAI project.
+- Temporary helper files, staging folders, and transient download folders are
+  cleaned up by default unless you use -KeepTempFiles.

@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "suite_id": "technical-terminology-shadow",
+  "suite_label": "Technical Terminology Shadow Set",
+  "tier": "shadow",
+  "description": "Secondary SimHub / Crew Chief / UI terminology regression set from the approved benchmark source set.",
+  "playlist_allowed": false,
+  "sources": [
+    {
+      "source_id": "de-crew-chief-jfySUBLx8Ps",
+      "title": "Crew Chief & Meine Settings | Die Basics",
+      "url": "https://www.youtube.com/watch?v=jfySUBLx8Ps",
+      "video_id": "jfySUBLx8Ps",
+      "expected_language": "de",
+      "suite_id": "technical-terminology-shadow",
+      "tier": "shadow",
+      "source_type": "single-video",
+      "topic_class": "sim-racing-settings",
+      "embedded_english_subtitles": "unknown",
+      "notes": "German Crew Chief basics reference clip.",
+      "expected_named_entities": [
+        {
+          "term": "Crew Chief",
+          "category": "product",
+          "expected_in_source": true,
+          "expected_in_translation": true,
+          "bad_forms": []
+        }
+      ]
+    },
+    {
+      "source_id": "fr-simhub-Iyh4XIyc_-Q",
+      "title": "SIMHUB pour les nuls dashboard tutorial",
+      "url": "https://www.youtube.com/watch?v=Iyh4XIyc_-Q",
+      "video_id": "Iyh4XIyc_-Q",
+      "expected_language": "fr",
+      "suite_id": "technical-terminology-shadow",
+      "tier": "shadow",
+      "source_type": "single-video",
+      "topic_class": "sim-racing-ui-tutorial",
+      "embedded_english_subtitles": "unknown",
+      "notes": "French SimHub tutorial clip.",
+      "expected_named_entities": [
+        {
+          "term": "SimHub",
+          "category": "product",
+          "expected_in_source": true,
+          "expected_in_translation": true,
+          "bad_forms": ["Simub", "sim up", "cimeb"]
+        }
+      ]
+    },
+    {
+      "source_id": "fr-simhub-8nK6WdZiOx4",
+      "title": "SIMHUB Le meilleur Dashboard pour le Rallye",
+      "url": "https://www.youtube.com/watch?v=8nK6WdZiOx4",
+      "video_id": "8nK6WdZiOx4",
+      "expected_language": "fr",
+      "suite_id": "technical-terminology-shadow",
+      "tier": "shadow",
+      "source_type": "single-video",
+      "topic_class": "sim-racing-ui-tutorial",
+      "embedded_english_subtitles": "unknown",
+      "notes": "Second French SimHub tutorial clip.",
+      "expected_named_entities": [
+        {
+          "term": "SimHub",
+          "category": "product",
+          "expected_in_source": true,
+          "expected_in_translation": true,
+          "bad_forms": ["Simub", "sim up", "cimeb"]
+        }
+      ]
+    },
+    {
+      "source_id": "en-simhub-KKW6hsjhi1I",
+      "title": "Simhub For Beginners - Learn Simhub Easily",
+      "url": "https://www.youtube.com/watch?v=KKW6hsjhi1I",
+      "video_id": "KKW6hsjhi1I",
+      "expected_language": "en",
+      "suite_id": "technical-terminology-shadow",
+      "tier": "shadow",
+      "source_type": "single-video",
+      "topic_class": "sim-racing-ui-tutorial",
+      "embedded_english_subtitles": "native_english",
+      "notes": "Optional English SimHub control clip.",
+      "expected_named_entities": [
+        {
+          "term": "SimHub",
+          "category": "product",
+          "expected_in_source": true,
+          "expected_in_translation": true,
+          "bad_forms": ["Simub", "sim up", "cimeb"]
+        }
+      ]
+    }
+  ]
+}

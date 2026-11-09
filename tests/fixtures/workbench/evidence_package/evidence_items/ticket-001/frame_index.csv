@@ -1,0 +1,2 @@
+timestamp_seconds,timestamp,full_frame_path,panel_crop_path,status
+200,00:03:20.000,evidence_items/ticket-001/frames/full/frame_0001.jpg,evidence_items/ticket-001/frames/panels/driver_view/frame_0001_driver_view.jpg,created

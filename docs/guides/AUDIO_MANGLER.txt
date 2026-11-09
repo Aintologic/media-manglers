@@ -1,0 +1,388 @@
+Audio Mangler
+=============
+
+Who it is for
+-------------
+
+Audio Mangler is for audio-first review. Use it when the spoken content matters
+more than pictures.
+
+Good fits:
+
+- podcasts
+- interviews
+- lectures
+- speeches
+- voice notes
+- multilingual audio that needs both the original transcript and translated
+  versions
+
+What it makes
+-------------
+
+Each completed package is built around the original spoken source and usually
+includes:
+
+- audio\review_audio.mp3
+- transcript\transcript_original.srt
+- transcript\transcript_original.json
+- transcript\transcript_original.txt
+- translations\<lang>\transcript.srt / .json / .txt when requested
+- comments\comments.txt / .json when requested and available from a YouTube
+  source
+- segment_index.csv
+- README_FOR_CODEX.txt
+- script_run.log
+
+Optional extras:
+
+- raw\ original source audio copy
+- ai_review_package.zip
+
+Packaged runs
+-------------
+
+Use the versioned ZIP bundle in dist\release as the normal handoff to another
+machine. The package now carries the app, the tracked python-core helper
+sidecar, and the Hybrid protected-terms profile assets stored under
+glossaries\ together.
+
+The loose EXE in dist\bin is still useful for local build checks, but it is not
+meant to be copied away by itself and treated as a fully standalone Hybrid
+package. Keep the loose EXE beside its sidecar folders if you use that surface.
+
+How translation works
+---------------------
+
+Audio Mangler always creates the original-language transcript first.
+
+If you request translation, it then creates translated transcript files from
+that original transcript and source audio. The app is designed to prefer the
+original spoken source, not weak platform auto-translation.
+
+Mode choices:
+
+- Local mode: local transcription plus local translation
+- AI Private: OpenAI transcription plus OpenAI text translation when translation
+  is actually needed
+- AI Public: local transcription plus OpenAI translation on the Public/shared
+  project
+- Hybrid: local transcription first, then OpenAI text-only English translation
+
+That difference matters. AI Public does not behave the same way as AI Private,
+and AI Public does not imply that source audio is uploaded to OpenAI for
+transcription.
+
+If the detected source language already matches the requested target language,
+the app now copies the original transcript into translations\<lang>\ and skips
+the OpenAI text-translation call. In AI Private, that still allows OpenAI
+transcription when the chosen mode requires it.
+
+Local translation paths:
+
+- to English: can use Whisper locally
+- to other target languages: can use Argos Translate when the language packages
+  are installed
+
+Interactive Local runs now ask which Whisper model to use. The beginner-friendly
+default on Enter is medium, and the prompt shows small, medium, and large with
+rough CPU-only transcription-time tradeoffs so operators are not surprised by
+the Local runtime cost. Scripted or -NoPrompt Local runs still keep the current
+accuracy-first default of large unless you explicitly pass -WhisperModel.
+
+Interactive translation now asks:
+
+  Translate the transcript into another language? (Y/n):
+
+If you answer Yes or just press Enter, the next prompt asks for the target
+language code and defaults to en on Enter.
+
+Local Whisper no longer uses one fixed wall-clock timeout for every run. Before
+a Local Whisper run starts, Audio Mangler now logs the source duration, chosen
+model, whether the Local path looks CPU-only or GPU-capable, audio track count
+when known, resolved transcript mode, effective transcription workload, the
+advisory estimated transcription duration, the hard runtime budget, and the
+separate stall watchdog. If an active helper exceeds the advisory estimate,
+the run keeps going and progress changes to over-estimate time plus
+hard-budget remaining time. Very long interactive Local runs offer a simple
+continue/switch-smaller/cancel prompt that auto-continues with the
+current/default model after -PromptTimeoutSeconds, while -NoPrompt runs stay
+non-interactive. You can still force a manual hard runtime budget with
+-WhisperTimeoutSeconds when needed.
+
+If local translation support is missing, the app explains what is missing, what
+it unlocks, and gives you install commands plus an install/skip/cancel choice.
+It does not auto-install dependencies behind your back.
+
+Console output
+--------------
+
+Normal runs now keep the console focused on the current phase, short progress
+updates, heartbeats, and the final PASS/WARN/FAIL summary. Full command lines,
+raw helper chatter, and low-level troubleshooting detail still go to
+script_run.log.
+
+Use -DebugMode when you want that deep detail streamed to the console too.
+
+OpenAI API key setup
+--------------------
+
+Create the key in your OpenAI Platform account:
+
+  https://platform.openai.com/api-keys
+
+Current OpenAI paths in code:
+
+- AI model selection can query GET /v1/models to see which repo-approved
+  models are visible to the selected key/project.
+- AI translation uses POST /v1/chat/completions
+- AI Private transcription uses POST /v1/audio/transcriptions
+
+How model selection works:
+
+- The script does not pick from every model a key can see.
+- It first checks which models are visible to the selected key/project.
+- It then chooses only from a repo-approved allowlist for the current mode.
+- AI Public translation is intentionally pinned to a small approved Public
+  list: gpt-4o-mini-2024-07-18 first, then gpt-4.1-mini-2025-04-14.
+- AI Private translation uses a separate approved preference list. Right now
+  it prefers gpt-5-mini and only falls back to other approved lower-cost
+  models if that Private key/project cannot use the first choice.
+- AI Private transcription keeps the current approved transcription model:
+  whisper-1.
+- If discovery succeeds, the script auto-selects the first visible approved
+  model for the chosen mode/project.
+- If discovery is skipped or only fails with network / timeout / server-style
+  errors, current main can still fall back to an approved explicit model or an
+  approved default model.
+- If discovery fails because of auth, permissions, quota, or because no
+  approved model is visible, the run stops instead of silently guessing.
+- -OpenAiModel is optional. If you set it, it must still be approved for the
+  chosen mode/project. When discovery succeeds, it must also be visible to
+  that key/project.
+
+Recommended setup for normal local use:
+
+- Create the key in your OpenAI Platform account.
+- Choose Owned by you.
+- Put Media Manglers in a dedicated project.
+- Choose Restricted.
+- In the current OpenAI Platform UI, turn on Request for Chat Completions
+  (/v1/chat/completions).
+- For AI Private, also turn on Request permission for audio transcription
+  access because Private AI mode sends source audio to OpenAI for
+  transcription.
+- Leave unrelated permissions like Images, Embeddings, Files, Fine-tuning,
+  Vector Stores, Assistants, Batches, and similar extras off or set to None
+  unless you actually use them.
+- Read Only is not enough because Audio Mangler sends POST
+  /v1/chat/completions requests for translation.
+- Service accounts are mainly for shared automation, servers, CI, or other
+  non-personal bot identities, not normal desktop use.
+- ChatGPT subscriptions and OpenAI API billing are separate.
+- OpenAI translation needs API billing/credits on the selected OpenAI Platform
+  project.
+- OpenAI API usage may incur charges.
+- Private is the default and safest key profile.
+- If you want a Private/Public split, create two separate OpenAI Platform
+  projects and one key per project.
+- Use OPENAI_API_KEY_PRIVATE for the default Private path.
+- Use OPENAI_API_KEY_PUBLIC only when you explicitly run -ProcessingMode AI
+  -OpenAiProject Public.
+- OPENAI_API_KEY still works as a legacy Private fallback for older setups.
+- The script cannot infer whether a pasted key is Private or Public.
+- Use Private for confidential, sensitive, internal, client, or proprietary
+  media. If you are unsure, use Private.
+- Use Public only for media you are allowed to share with OpenAI.
+- Public/shared complimentary tokens only apply when the Public project is
+  configured for shared traffic and the request uses an eligible model.
+- Public mode will not auto-upgrade itself to broader or more expensive models
+  just because the key can see them.
+- If a request would cross the remaining complimentary daily quota, OpenAI
+  bills the whole request normally.
+
+Ways to provide the key on Windows:
+
+- Paste it at the prompt for the current run only.
+- Current PowerShell session:
+
+  $env:OPENAI_API_KEY_PRIVATE="sk-..."
+
+- Public project session:
+
+  $env:OPENAI_API_KEY_PUBLIC="sk-..."
+  powershell -NoProfile -ExecutionPolicy Bypass -File '.\Audio Mangler.ps1' -TranslateTo en -ProcessingMode AI -OpenAiProject Public
+
+- Legacy fallback:
+
+  $env:OPENAI_API_KEY="sk-..."
+
+- Persistent Windows user variable:
+
+  [System.Environment]::SetEnvironmentVariable("OPENAI_API_KEY_PRIVATE","sk-...","User")
+
+After setting the persistent user variable, open a new PowerShell window before
+rerunning the app. Do not hardcode the key in the script or commit it to GitHub.
+
+Examples
+--------
+
+Approved bounded remote smoke audio examples:
+
+  https://www.youtube.com/watch?v=1aA1WGON49E
+  https://www.youtube.com/watch?v=7_u8Qj78cA0
+  https://www.youtube.com/watch?v=WPm2N93SmTA
+
+Command-line summary
+--------------------
+
+Current main behavior:
+
+- ProcessingMode is the primary operator-facing switch.
+- If you do not pass -ProcessingMode, Audio Mangler defaults to Local.
+- If you do not explicitly pass -WhisperModel and the resolved mode is Local,
+  interactive runs prompt for small, medium, or large and default to medium on
+  Enter. -NoPrompt and other scripted Local runs still keep the current large
+  default unless you set -WhisperModel yourself.
+- -OpenAiProject Private = OpenAI transcription + OpenAI translation in AI
+  mode, or private-project text-only translation in Hybrid.
+- -OpenAiProject Public = local transcription + OpenAI translation on the
+  Public/shared project in AI mode, or Public/shared-project text-only
+  translation in Hybrid.
+- Hybrid defaults to generic mode with no Protected Terms Profile selected.
+  Use -ProtectedTermsProfile sim-racing only when you intentionally want that
+  seeded domain profile.
+- Remote playlist or larger multi-item expansions now pause for a scope review
+  before the real run starts. Use -ApproveExpandedRun for reviewed scripted
+  runs.
+- -NoPrompt disables the interactive questions and uses the non-interactive
+  defaults.
+- -PromptTimeoutSeconds controls routine timed defaults, including the Local
+  Whisper runtime warning. Default: 60. Use 0 to disable timed defaults.
+- -Version and -ShowVersion are aliases for the same version-only path.
+
+Parameters:
+
+- -InputPath / -InputUrl: local audio file/folder or a direct/page/YouTube
+  URL. If omitted, interactive runs ask and non-interactive runs scan
+  -InputFolder.
+- -InputFolder: default scan/cache root when -InputPath is omitted. Default:
+  Media Mangler\_AUDIO_INPUT inside your own Music folder (the one Windows
+  reports, so it follows a move to OneDrive or another drive).
+- -OutputFolder: root folder for output packages and logs. Default:
+  Media Mangler\_AUDIO_OUTPUT inside your own Music folder. A temp folder is
+  refused: the Windows temp folder, or any folder inside a folder named Temp
+  or Tmp (for example C:\TEMP), because it can be emptied without warning.
+- -FFmpegPath: the ffmpeg.exe to use. Default: none; FFmpeg is looked for on
+  PATH, then in its own install folders (the Windows Package Manager folders).
+  When it is not found, the message gives the official page and the winget
+  command (winget install --id Gyan.FFmpeg -e).
+- -PythonExe: override the Python launcher used for Whisper, Argos, and the
+  yt-dlp module fallback. Default: py.
+- -YtDlpPath: override the yt-dlp command/path used for remote inputs that
+  need it. Default: yt-dlp.
+- -WhisperModel: choose the local Whisper model. Literal script default: base.
+  Interactive Local runs now prompt for small, medium, or large and default to
+  medium on Enter. Non-interactive Local runs still default to large when you
+  do not explicitly set the parameter.
+- -Language: optional source-language hint for transcription and local
+  translation. Leave blank to auto-detect when possible.
+- -TranslateTo: comma-separated target language codes such as en or en,es.
+  Blank means no translated transcript outputs in scripted runs. Interactive
+  runs now ask a yes/no question first and default the follow-up target-code
+  prompt to en.
+- -ProcessingMode: primary mode switch. Valid values: Local, AI, Hybrid.
+  Default: Local.
+- -TranslationProvider: legacy compatibility flag. Valid values: Auto,
+  OpenAI, Local. Current main maps it into ProcessingMode; new runs should
+  prefer -ProcessingMode.
+- -OpenAiModel: optional OpenAI translation model request. Explicit values
+  must be repo-approved for the chosen mode/project and, when discovery
+  succeeds, visible to that key/project.
+- -ProtectedTermsProfile: optional Hybrid-only protected-terms profile
+  selection. Leave it blank for generic mode, or use sim-racing when you
+  intentionally want the seeded sim-racing profile.
+- -DebugMode: stream helper chatter, command lines, and other troubleshooting
+  detail to the console. Normal mode keeps that detail in script_run.log.
+- -OpenAiProject: valid values: Private, Public. Default: Private when AI or
+  Hybrid mode is used. Ignored in Local mode.
+- -HeartbeatSeconds: how often long-running steps log progress. Default: 10.
+- -WhisperTimeoutSeconds: optional explicit Local Whisper hard runtime-budget
+  override in seconds. Leave it unset to use the adaptive hard
+  runtime-budget logic.
+- -CopyRawAudio: copy the original source audio into the package raw folder.
+  CLI default: off. Interactive default on Enter: Yes.
+- -IncludeComments: request YouTube comments when the source supports them.
+  CLI default: off. Interactive YouTube default on Enter: Yes.
+- -CreateAiReviewZip: build ai_review_package.zip for each completed package.
+  CLI default: off. Interactive default on Enter: Yes. Legacy alias:
+  -CreateChatGptZip.
+- -KeepTempFiles: keep temporary working files and download caches instead of
+  cleaning them up. Default: off.
+- -OpenOutputInExplorer: open the output folder in Windows Explorer when the
+  run finishes. CLI default: off. Interactive default on Enter: Yes.
+- -NoPrompt: disable interactive questions and use the non-interactive
+  defaults described above.
+- -PromptTimeoutSeconds: seconds to wait before defaulting routine interactive
+  prompts, including the Local Whisper runtime warning. Default: 60. Use 0 to
+  disable timed defaults.
+- -ApproveExpandedRun: allow a reviewed expanded remote run to continue in
+  non-interactive mode after the playlist/large-batch scope summary.
+- -SkipEstimate: skip the runtime estimate stage. Default: off.
+- -Version / -ShowVersion: print the app version and exit.
+- -AiReviewZipMaxMb: maximum AI review ZIP size in MB. Default: 500. Legacy
+  alias: -ChatGptZipMaxMb.
+
+Example commands:
+
+- Show the version:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File '.\Audio Mangler.ps1' -Version
+
+- Local review package with translated outputs and no prompts:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File '.\Audio Mangler.ps1' -InputPath 'C:\Audio\interview.mp3' -OutputFolder 'C:\Reviews\Audio' -TranslateTo en,es -NoPrompt
+
+- AI Private remote audio run:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File '.\Audio Mangler.ps1' -InputUrl 'https://www.youtube.com/watch?v=7_u8Qj78cA0' -TranslateTo en -ProcessingMode AI -OpenAiProject Private -NoPrompt
+
+- AI Public run with a YouTube source and comments:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File '.\Audio Mangler.ps1' -InputUrl 'https://www.youtube.com/watch?v=WPm2N93SmTA' -TranslateTo en -ProcessingMode AI -OpenAiProject Public -IncludeComments -NoPrompt
+
+- Keep temporary files while testing a non-default Whisper model:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File '.\Audio Mangler.ps1' -InputPath 'C:\Audio\note.wav' -WhisperModel medium -KeepTempFiles -NoPrompt
+
+Validation
+----------
+
+Smoke test:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\smoke\Run-AudioSmokeTest.ps1
+
+Translation smoke test:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\smoke\Run-AudioSmokeTest.ps1 -TranslateTo en -ProcessingMode Local
+
+Validator:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\validation\Validate-AudioManglerPackage.ps1
+
+Run-AudioSmokeTest.ps1 now prefers short local fixtures under AREA51\TestData
+before it falls back to the approved bounded remote set. The fast default
+is AREA51\TestData\1_min_test_Video.mp4, and -TranslateToEnglish also prefers
+AREA51\TestData\German_audio_short_45s.mp3 when that local-only helper
+fixture is present.
+
+Notes
+-----
+
+- Local mode keeps transcription and translation on your machine after its
+  dependencies are installed.
+- AI Private sends source audio plus transcript/translation content to OpenAI.
+- AI Public keeps transcription local and only sends transcript/translation
+  content to the Public/shared OpenAI project.
+- Temporary helper files and staging folders are cleaned up by default unless
+  you use -KeepTempFiles.

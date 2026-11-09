@@ -1,0 +1,17 @@
+{
+  "summary": {
+    "review_needed_count": 1,
+    "visual_followup_required_count": 1
+  },
+  "review_needed": [
+    {
+      "review_id": "review-001",
+      "reason": "implicit_issue_with_ui_or_domain_context",
+      "source_filename": "fixture-session.mp4",
+      "timestamp_start": "00:07:00.000",
+      "timestamp_end": "00:08:00.000",
+      "transcript_excerpt": "The dashboard label is hard to read here.",
+      "visual_followup_required": true
+    }
+  ]
+}

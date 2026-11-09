@@ -1,0 +1,30 @@
+{
+  "_comment": "Copy these keys into %APPDATA%\\MediaManglers\\config.json and replace placeholders with your local folders and private terms. Do not commit the local config.",
+  "reviewMediaInbox": {
+    "sourceFolders": [
+      "C:\\Videos\\ReviewQueue"
+    ],
+    "evidenceRoot": "C:\\Reviews\\MediaManglers",
+    "localWorkRoot": "C:\\Temp\\MediaManglers\\ReviewWork",
+    "ledgerPath": "C:\\Reviews\\MediaManglers\\review-ledger.sqlite",
+    "dedupeMode": "Fast",
+    "recurse": true,
+    "order": "Oldest",
+    "maxFiles": 3,
+    "maxDurationMinutes": 240,
+    "concurrency": 1,
+    "pendingBatchLimit": 1
+  },
+  "evidence": {
+    "targetRepo": "owner/example-project",
+    "repoMapPath": "C:\\Reviews\\MediaManglers\\evidence_repo_hints.local.json",
+    "customMarkers": [
+      "make this a ticket",
+      "review this example issue"
+    ],
+    "customDomainTerms": [
+      "example dashboard",
+      "example overlay"
+    ]
+  }
+}

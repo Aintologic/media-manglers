@@ -1,0 +1,797 @@
+"""One safe way to replace, move or remove a file or folder (242, 224): a crash, a full disk or another
+program holding the file leaves the old file or the whole new one, never half of it, and never loses data.
+
+The app had sixteen copies of the replace, each with some of the care below. This one has all of it. Wave A uses
+it for the files it rewrites (``settings.json``, the profiles, the records' receipts), and since Wave B1
+(224) Review Media Inbox's seven copies hand their replace to it. Since Wave B2a the Inbox's folder moves,
+renames and clean-ups use it too (``move``, ``remove``, ``remove_disposable_tree``, ``replace_file``):
+
+- the new text goes into a short, unique name beside the target, so a long target path stays within
+  Windows' path limit while the temporary file exists (73), and two writers never share a name;
+- it is flushed to the disk before the rename (183: a rename alone left a damaged file after a system
+  crash, because the data was still in the write cache);
+- antivirus scanners, the search indexer and Explorer's thumbnails open a file the app has just written for a
+  moment, and Windows refuses to rename or delete it (or the folder holding it) until they let go. Only those
+  refusals are waited for, in one shared loop: a sharing or lock violation, or "access denied" while the
+  file is still there (a folder whose file is open gets that). Every other error fails at once. The wait is
+  bounded: under a second for the app's own small files (``SHORT_WAIT_SECONDS``), ten seconds for the Inbox's
+  steps, which run in a background helper and never freeze the window (``INBOX_WAIT_SECONDS``);
+- the app never waits for itself: at the first refusal it asks Windows' Restart Manager who holds the file,
+  and when that is the app (this process, the Workbench that started it, or one of their children, each step
+  checked by its start time) it stops at once, because waiting cannot help;
+- when Windows still refuses at the deadline, the error says so in plain words (``FileInUse``), naming the
+  program that holds the file when Windows can say which;
+- the temporary file is always removed.
+
+It also makes the one checked copy of a database (``checked_copy``, 224 Wave B2a): a backup the app relies on
+gets its real name only after it passed SQLite's damage check and holds every table's rows.
+"""
+
+from __future__ import annotations
+
+import errno
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import sqlite3
+import time
+from typing import Any, Callable, Iterator, TypeVar
+from urllib.parse import quote
+import uuid
+
+T = TypeVar("T")
+
+SHORT_WAIT_SECONDS = 0.75
+INBOX_WAIT_SECONDS = 10.0
+# The pauses between tries: quick at first, then once a second until the wait is used up.
+PAUSE_STEPS = (0.05, 0.1, 0.2, 0.4, 0.8)
+LATER_PAUSE_SECONDS = 1.0
+# The Workbench writes "<process number>:<start time>" here when it starts, so the host, the helpers and FFmpeg it
+# starts know which process is the app.
+APP_PROCESS_VARIABLE = "MEDIA_MANGLERS_APP_PROCESS"
+TRASH_PREFIX = ".mm-trash-"
+# Windows' own numbers: access denied, sharing violation, lock violation; ReplaceFileW's "could not remove the
+# file to be replaced" and "could not move the replacement".
+_ACCESS_DENIED, _SHARING_VIOLATION, _LOCK_VIOLATION = 5, 32, 33
+_UNABLE_TO_REMOVE_REPLACED, _UNABLE_TO_MOVE_REPLACEMENT, _UNABLE_TO_MOVE_REPLACEMENT_2 = 1175, 1176, 1177
+# "The directory is not empty": what removing a folder answers while a file in it waits to be deleted, because a
+# virus scan opened it allowing deletion and has not let go yet.
+_DIRECTORY_NOT_EMPTY = 145
+# A folder's holder is found through the files inside it; at most this many are asked about.
+_HOLDER_FILES_PER_FOLDER = 512
+
+
+class FileInUse(PermissionError):
+    """Windows still refused to replace, move or remove the file after the wait (another program kept it open),
+    or the app itself holds it. It was left as it was. The message names the program when Windows can say
+    which."""
+
+
+class FileStepRefused(OSError):
+    """A move or removal Windows refused for a reason other than another program holding the file (the path is
+    not there, the disk is full, a folder on another drive). Nothing was moved or removed."""
+
+
+class CopyNotChecked(RuntimeError):
+    """A database copy did not pass its checks, so it was not kept under the backup's name."""
+
+
+# Writing a small file --------------------------------------------------------------------------------
+
+
+def write_text(path: Path | str, text: str, *, encoding: str = "utf-8", wait: float = SHORT_WAIT_SECONDS) -> Path:
+    """Replace ``path`` with ``text``. Lines end the way ``Path.write_text`` ends them on this system."""
+
+    def write(temporary: Path) -> None:
+        with open(temporary, "w", encoding=encoding) as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+
+    return _replace(Path(path), write, wait)
+
+
+def write_bytes(path: Path | str, data: bytes, *, wait: float = SHORT_WAIT_SECONDS) -> Path:
+    """Replace ``path`` with exactly ``data`` (a backup put back as it was, byte for byte)."""
+
+    def write(temporary: Path) -> None:
+        with open(temporary, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+
+    return _replace(Path(path), write, wait)
+
+
+def write_json(path: Path | str, data: Any, *, wait: float = SHORT_WAIT_SECONDS) -> Path:
+    """Replace ``path`` with ``data`` as indented JSON, the way the app's settings files are written."""
+
+    return write_text(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n", wait=wait)
+
+
+def _replace(target: Path, write: Callable[[Path], None], wait: float) -> Path:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(f".mm-{uuid.uuid4().hex[:16]}.tmp")
+    try:
+        write(temporary)
+        # 224 (Wave B2a review): a small file is waited for even when the app's own reader has it open for a
+        # moment (the PowerShell host reads the Inbox's progress file every half second while it is replaced).
+        _with_wait(lambda: os.replace(temporary, target), [target, temporary], "replaced", wait, None,
+                   source=temporary, app_check=False)
+        if os.name != "nt":
+            # Linux and macOS: the rename itself reaches the disk once the folder is flushed. NTFS
+            # records renames in its journal.
+            folder = os.open(target.parent, os.O_RDONLY)
+            try:
+                os.fsync(folder)
+            finally:
+                os.close(folder)
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return target
+
+
+# Moving and removing ---------------------------------------------------------------------------------
+
+
+def remove(path: Path | str, *, wait: float = SHORT_WAIT_SECONDS,
+           pause: Callable[[float], None] | None = None) -> None:
+    """Delete the file ``path`` if it is there, waiting for a program that has it open for a moment."""
+
+    target = Path(path)
+
+    def unlink() -> None:
+        target.unlink(missing_ok=True)
+
+    _with_wait(unlink, [target], "removed", wait, pause, source=target)
+
+
+def move(source: Path | str, destination: Path | str, *, wait: float = INBOX_WAIT_SECONDS,
+         pause: Callable[[float], None] | None = None) -> Path:
+    """Move the file or folder ``source`` to ``destination``, which must not be there yet (nothing is ever
+    written over). On one drive it is a rename. A file moving to another drive is copied, checked byte for
+    byte, given its name, and only then removed from where it was; a folder is only ever moved within one
+    drive. Whatever fails, the data is where it was."""
+
+    source, destination = Path(source), Path(destination)
+    if not os.path.lexists(source):
+        raise FileStepRefused(f"{source.name} could not be moved: it is not there. Nothing was moved. ({source})")
+    if os.path.lexists(destination):
+        raise FileStepRefused(
+            f"{source.name} was not moved: {destination.name} is already there, and the app never writes over "
+            f"it. Nothing was moved. ({destination})")
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise _refused(exc, source, "moved") from exc
+    if _same_drive(source, destination.parent):
+        # os.rename, unlike os.replace, refuses a destination that appeared in the meantime.
+        _with_wait(lambda: os.rename(source, destination), _holder_paths(source), "moved", wait, pause,
+                   source=source)
+        return destination
+    if source.is_dir():
+        raise FileStepRefused(
+            f"{source.name} could not be moved: a folder is moved only within one drive, and "
+            f"{destination.parent} is on another. Nothing was moved. ({source})")
+    copy_file(source, destination, wait=wait, pause=pause)
+    try:
+        remove(source, wait=wait, pause=pause)
+    except FileInUse as exc:
+        raise FileInUse(
+            f"{source.name} was copied to {destination} and checked, but the original could not be removed: "
+            f"{exc} Nothing was lost.") from exc
+    return destination
+
+
+def copy_file(source: Path | str, destination: Path | str, *, wait: float = INBOX_WAIT_SECONDS,
+              pause: Callable[[float], None] | None = None) -> Path:
+    """A copy of the file ``source`` at ``destination`` (which must not be there yet), made under a short
+    partial name beside it, flushed to the disk and checked byte for byte against the original before it gets
+    its name. A copy that does not check out is removed and never looks like the real file."""
+
+    source, destination = Path(source), Path(destination)
+    if os.path.lexists(destination):
+        raise FileStepRefused(
+            f"{source.name} was not copied: {destination.name} is already there, and the app never writes over "
+            f"it. ({destination})")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    partial = destination.with_name(f".mm-{uuid.uuid4().hex[:16]}.partial")
+    try:
+        try:
+            shutil.copy2(source, partial)
+            with open(partial, "rb+") as handle:
+                os.fsync(handle.fileno())
+        except OSError as exc:
+            raise _refused(exc, source, "copied") from exc
+        if partial.stat().st_size != source.stat().st_size or _sha256(partial) != _sha256(source):
+            raise FileStepRefused(f"The copy of {source.name} did not match the original, so it was not kept. "
+                                  f"Nothing was lost. ({source})")
+        _with_wait(lambda: os.rename(partial, destination), [partial, destination], "moved", wait, pause,
+                   source=partial)
+    finally:
+        try:
+            partial.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return destination
+
+
+def remove_disposable_tree(path: Path | str, *, within: Path | str, wait: float = INBOX_WAIT_SECONDS,
+                           pause: Callable[[float], None] | None = None, leftovers: Path | str | None = None) -> None:
+    """Delete ``path`` (a folder or a file) the app made and no longer needs, which must lie inside ``within``.
+
+    A folder is first renamed to a trash name beside it and then deleted, so a delete cut short never looks
+    like real data. When another program still holds something in it at the deadline, ``FileInUse`` is raised
+    with what was left; with ``leftovers`` the path is also noted there, and ``sweep_leftovers`` removes it at
+    the next run."""
+
+    target, root = Path(path), Path(within)
+    if not _strictly_within(root, target):
+        raise FileStepRefused(f"{target.name} was not removed: it is not inside {root}. ({target})")
+    if not os.path.lexists(target):
+        _sweep_trash_beside(target, root, pause=pause, leftovers=leftovers)
+        return
+    if not target.is_dir():
+        try:
+            remove(target, wait=wait, pause=pause)
+        except FileInUse:
+            _note_leftover(leftovers, target, root)
+            raise
+        _sweep_trash_beside(target, root, pause=pause, leftovers=leftovers)
+        return
+    trash = target.with_name(f"{TRASH_PREFIX}{uuid.uuid4().hex[:12]}")
+    try:
+        _with_wait(lambda: os.rename(target, trash), _holder_paths(target), "removed", wait, pause, source=target)
+    except (FileInUse, FileStepRefused):
+        _note_leftover(leftovers, target, root)
+        raise
+    try:
+        _with_wait(lambda: shutil.rmtree(trash), _holder_paths(trash), "removed", wait, pause, source=trash,
+                   deleting=True)
+    except FileInUse:
+        _note_leftover(leftovers, trash, root)
+        raise
+    except FileStepRefused as exc:
+        # Already set aside under its trash name, so "nothing was removed" would not be true.
+        _note_leftover(leftovers, trash, root)
+        reason = (getattr(exc.__cause__, "strerror", None) or str(exc.__cause__ or exc)).strip().rstrip(".")
+        raised = FileStepRefused(
+            f"{target.name} was set aside as {trash.name} to be removed, but Windows refused to remove part of it "
+            f"({reason}). Nothing that is needed was lost; it is removed at the next run. ({trash})")
+        raised.errno, raised.winerror = exc.errno, getattr(exc, "winerror", None)  # type: ignore[attr-defined]
+        raise raised from exc
+    _sweep_trash_beside(target, root, pause=pause, leftovers=leftovers)
+
+
+def _sweep_trash_beside(target: Path, root: Path, *, pause: Callable[[float], None] | None,
+                        leftovers: Path | str | None) -> None:
+    """Remove the trash folders beside ``target`` that an earlier delete left when it was cut short (224, Wave
+    B2a): a crash in the middle of deleting one leaves it under its trash name, on no leftovers list. Only this
+    helper makes those names, so they are always the app's own disposable copies. One another program still
+    holds is noted for the next run; it never fails the clean-up that found it."""
+
+    try:
+        found = [item for item in target.parent.iterdir() if item.name.startswith(TRASH_PREFIX)]
+    except OSError:
+        return
+    for trash in found:
+        if not _strictly_within(root, trash):
+            continue
+        try:
+            if trash.is_dir() and not trash.is_symlink():
+                _with_wait(lambda: shutil.rmtree(trash), _holder_paths(trash), "removed", SHORT_WAIT_SECONDS,
+                           pause, source=trash, deleting=True)
+            else:
+                remove(trash, pause=pause)
+        except FileInUse:
+            _note_leftover(leftovers, trash, root)
+        except OSError:
+            pass
+
+
+def sweep_leftovers(leftovers: Path | str, *, wait: float = SHORT_WAIT_SECONDS,
+                    pause: Callable[[float], None] | None = None) -> list[str]:
+    """Remove what an earlier run noted in ``leftovers`` (``remove_disposable_tree``) because another program
+    still held it then. Returns a plain line for each one still held now; those stay noted for the next run."""
+
+    note = Path(leftovers)
+    if not note.is_file():
+        return []
+    try:
+        entries = json.loads(note.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    kept: list[dict[str, str]] = []
+    messages: list[str] = []
+    for entry in entries if isinstance(entries, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        target, root = Path(str(entry.get("path") or "")), Path(str(entry.get("within") or ""))
+        if not str(entry.get("path") or "") or not _strictly_within(root, target):
+            continue
+        try:
+            remove_disposable_tree(target, within=root, wait=wait, pause=pause)
+        except FileInUse as exc:
+            kept.append({"path": str(target), "within": str(root)})
+            messages.append(str(exc))
+        except OSError as exc:
+            messages.append(str(exc))
+    try:
+        if kept:
+            write_json(note, kept)
+        else:
+            remove(note)
+    except OSError:
+        pass
+    return messages
+
+
+def replace_file(target: Path | str, replacement: Path | str, backup_name: str, *,
+                 wait: float = INBOX_WAIT_SECONDS, pause: Callable[[float], None] | None = None) -> Path:
+    """Put ``replacement`` in ``target``'s place in one Windows step (``ReplaceFileW``), keeping the old target
+    beside it as ``backup_name``. Both files are where they were when it fails; the backup is never written
+    over. Returns the backup's path."""
+
+    target, replacement = Path(target), Path(replacement)
+    backup = target.with_name(backup_name)
+    if os.path.lexists(backup):
+        raise FileStepRefused(f"{target.name} was not replaced: {backup.name} is already there, and the app never "
+                              f"writes over it. ({backup})")
+    for path in (target, replacement):
+        if not path.is_file():
+            raise FileStepRefused(f"{target.name} was not replaced: {path.name} is not there. ({path})")
+    if os.name == "nt":
+        step = lambda: _replace_file_windows(target, replacement, backup)  # noqa: E731
+    else:
+        def step() -> None:
+            os.rename(target, backup)
+            try:
+                os.rename(replacement, target)
+            except OSError:
+                os.rename(backup, target)
+                raise
+    _with_wait(step, [target, replacement], "replaced", wait, pause, source=target)
+    return backup
+
+
+def _replace_file_windows(target: Path, replacement: Path, backup: Path) -> None:
+    import ctypes  # noqa: PLC0415
+    from ctypes import wintypes  # noqa: PLC0415
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.ReplaceFileW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD,
+                                      ctypes.c_void_p, ctypes.c_void_p]
+    kernel32.ReplaceFileW.restype = wintypes.BOOL
+    write_through = 0x1
+    if kernel32.ReplaceFileW(str(target), str(replacement), str(backup), write_through, None, None):
+        return
+    code = ctypes.get_last_error()
+    if code == _UNABLE_TO_MOVE_REPLACEMENT_2 and backup.exists() and not target.exists():
+        # The old file already has the backup's name, but the replacement could not take its place: the old file
+        # goes back, so nothing is lost and the next try starts from the same state.
+        os.rename(backup, target)
+    raise OSError(errno.EACCES, ctypes.FormatError(code).strip(), str(target), code)
+
+
+# The one wait ----------------------------------------------------------------------------------------
+
+
+def _pauses(wait: float) -> Iterator[float]:
+    total, index = 0.0, 0
+    while total < wait - 1e-9:
+        step = PAUSE_STEPS[index] if index < len(PAUSE_STEPS) else LATER_PAUSE_SECONDS
+        step = min(step, wait - total)
+        yield step
+        total += step
+        index += 1
+
+
+def _is_hold(exc: OSError, source: Path | None, *, deleting: bool = False) -> bool:
+    """Whether ``exc`` is Windows refusing because a program has the file open, the one refusal worth waiting
+    for. While a folder is deleted, "the directory is not empty" is one too: a file in it waits to be deleted
+    until the program that opened it lets go."""
+
+    if os.name != "nt":
+        return exc.errno in (errno.EBUSY, errno.ETXTBSY)
+    code = getattr(exc, "winerror", None)
+    if code in (_SHARING_VIOLATION, _LOCK_VIOLATION, _UNABLE_TO_REMOVE_REPLACED, _UNABLE_TO_MOVE_REPLACEMENT,
+                _UNABLE_TO_MOVE_REPLACEMENT_2):
+        return True
+    if deleting and code == _DIRECTORY_NOT_EMPTY:
+        return True
+    # A folder whose file is open, or a file being deleted, answers "access denied"; once the file is gone the
+    # same answer means something else.
+    return code == _ACCESS_DENIED and (source is None or os.path.lexists(source))
+
+
+def _with_wait(step: Callable[[], T], paths: list[Path], done: str, wait: float,
+               pause: Callable[[float], None] | None, *, source: Path | None = None, app_check: bool = True,
+               deleting: bool = False) -> T:
+    """Run ``step``, waiting a bounded time while another program holds the file. Without ``app_check`` a hold
+    by the app itself is waited for too (a small file's replace, which the app's own reader holds only for a
+    moment)."""
+
+    pauses = _pauses(wait)
+    asked = not app_check
+    while True:
+        try:
+            return step()
+        except OSError as exc:
+            if not _is_hold(exc, source, deleting=deleting):
+                if done in {"moved", "removed"}:
+                    raise _refused(exc, paths[0], done) from exc
+                raise
+            if not asked:
+                asked = True
+                if _app_holds(paths):
+                    raise FileInUse(_own_message(paths[0], done)) from exc
+            delay = next(pauses, None)
+            if delay is None:
+                raise FileInUse(_held_message(paths[0], done, paths)) from exc
+            (pause or time.sleep)(delay)
+
+
+def _refused(exc: OSError, path: Path, done: str) -> FileStepRefused:
+    reason = (exc.strerror or str(exc)).strip().rstrip(".")
+    refused = FileStepRefused(
+        f"{path.name} could not be {done}: Windows refused it ({reason}). Nothing was moved or removed. ({path})")
+    refused.errno, refused.winerror = exc.errno, getattr(exc, "winerror", None)  # type: ignore[attr-defined]
+    return refused
+
+
+def _own_message(target: Path, done: str) -> str:
+    unchanged = "Nothing was changed" if done == "replaced" else "Nothing was moved or removed"
+    return (f"The app itself still has {target.name} open, so it did not wait. {unchanged}. This is a fault in "
+            f"the app. ({target})")
+
+
+def _held_message(target: Path, done: str, paths: list[Path]) -> str:
+    names = holders(paths)
+    if names:
+        return (f"{target.name} could not be {done} because {', '.join(names)} has it open. Nothing was lost. "
+                f"Close that program or wait a moment, then try again. ({target})")
+    # Windows names no program: the file may be read-only, not allowed, or held by something it cannot see.
+    return (f"{target.name} could not be {done}: Windows did not say which program has it open. Nothing was "
+            f"lost. Close any program that may be using it, or wait a moment, then try again; if none is, check "
+            f"that it is not read-only. ({target})")
+
+
+def _holder_paths(path: Path) -> list[Path]:
+    """The paths Windows is asked about for ``path``: a folder's holder is found through the files inside."""
+
+    if not path.is_dir():
+        return [path]
+    found = [path]
+    for current, _folders, files in os.walk(path):
+        for name in files:
+            found.append(Path(current) / name)
+            if len(found) > _HOLDER_FILES_PER_FOLDER:
+                return found
+    return found
+
+
+def _same_drive(source: Path, folder: Path) -> bool:
+    return os.stat(source).st_dev == os.stat(folder).st_dev
+
+
+def _strictly_within(root: Path, target: Path) -> bool:
+    try:
+        root_resolved, target_resolved = root.resolve(), target.resolve()
+    except OSError:
+        return False
+    return root_resolved != target_resolved and root_resolved in target_resolved.parents
+
+
+def _note_leftover(leftovers: Path | str | None, path: Path, within: Path) -> None:
+    if leftovers is None:
+        return
+    note = Path(leftovers)
+    try:
+        entries = json.loads(note.read_text(encoding="utf-8")) if note.is_file() else []
+    except (OSError, ValueError):
+        entries = []
+    entries = [entry for entry in entries if isinstance(entry, dict)] if isinstance(entries, list) else []
+    if not any(str(entry.get("path")) == str(path) for entry in entries):
+        entries.append({"path": str(path), "within": str(within)})
+    try:
+        write_json(note, entries)
+    except OSError:
+        pass
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+# Who holds it ----------------------------------------------------------------------------------------
+
+
+def holders(paths: list[Path]) -> list[str]:
+    """The programs that have any of ``paths`` open, by name and process number, as Windows' Restart Manager
+    reports them; [] elsewhere or when Windows cannot tell."""
+
+    return [f"{name or 'a program'} (process {pid})" for pid, _start, name in _holder_processes(paths)]
+
+
+def _holder_processes(paths: list[Path]) -> list[tuple[int, int, str]]:
+    """(process number, start time, name) of every program holding any of ``paths``."""
+
+    if os.name != "nt":
+        return []
+    try:
+        # Restart Manager knows files only; a folder in the list makes it refuse the whole question.
+        files = [str(path) for path in paths if not Path(path).is_dir()]
+        return _restart_manager_holders(files) if files else []
+    except Exception:  # noqa: BLE001 - naming the holder is a courtesy; the error itself is raised anyway
+        return []
+
+
+def _restart_manager_holders(paths: list[str]) -> list[tuple[int, int, str]]:
+    import ctypes
+    from ctypes import wintypes
+
+    class UniqueProcess(ctypes.Structure):
+        _fields_ = [("dwProcessId", wintypes.DWORD), ("ProcessStartTime", wintypes.FILETIME)]
+
+    class ProcessInfo(ctypes.Structure):
+        _fields_ = [("Process", UniqueProcess), ("strAppName", wintypes.WCHAR * 256),
+                    ("strServiceShortName", wintypes.WCHAR * 64), ("ApplicationType", ctypes.c_int),
+                    ("AppStatus", wintypes.ULONG), ("TSSessionId", wintypes.DWORD), ("bRestartable", wintypes.BOOL)]
+
+    manager = ctypes.WinDLL("rstrtmgr")
+    session = wintypes.DWORD()
+    key = ctypes.create_unicode_buffer(33)
+    if manager.RmStartSession(ctypes.byref(session), 0, key) != 0:
+        return []
+    try:
+        files = (wintypes.LPCWSTR * len(paths))(*paths)
+        if manager.RmRegisterResources(session, len(paths), files, 0, None, 0, None) != 0:
+            return []
+        needed, count, reasons = wintypes.UINT(0), wintypes.UINT(0), wintypes.DWORD(0)
+        result = manager.RmGetList(session, ctypes.byref(needed), ctypes.byref(count), None, ctypes.byref(reasons))
+        if result not in (0, 234) or needed.value == 0:  # 234: more data, the list is the size given in needed
+            return []
+        found = (ProcessInfo * needed.value)()
+        count = wintypes.UINT(needed.value)
+        if manager.RmGetList(session, ctypes.byref(needed), ctypes.byref(count), found, ctypes.byref(reasons)) != 0:
+            return []
+        seen: list[tuple[int, int, str]] = []
+        for info in found[: count.value]:
+            started = info.Process.ProcessStartTime
+            entry = (int(info.Process.dwProcessId), (started.dwHighDateTime << 32) | started.dwLowDateTime,
+                     str(info.strAppName or ""))
+            if entry not in seen:
+                seen.append(entry)
+        return seen
+    finally:
+        manager.RmEndSession(session)
+
+
+# Which process is the app ----------------------------------------------------------------------------
+
+
+def mark_app_process() -> None:
+    """Called once by the Workbench when it starts: the programs it starts (the PowerShell host, the helpers,
+    FFmpeg) inherit this, so a file any of them holds counts as the app's own."""
+
+    started = _process_start_time(os.getpid())
+    os.environ[APP_PROCESS_VARIABLE] = f"{os.getpid()}:{started or 0}"
+
+
+def _app_roots() -> dict[int, int | None]:
+    roots: dict[int, int | None] = {os.getpid(): None}
+    pid_text, _sep, start_text = os.environ.get(APP_PROCESS_VARIABLE, "").partition(":")
+    try:
+        if int(pid_text) > 0 and int(start_text) > 0:
+            roots.setdefault(int(pid_text), int(start_text))
+    except ValueError:
+        pass
+    return roots
+
+
+def _app_holds(paths: list[Path]) -> bool:
+    found = _holder_processes(paths)
+    if not found:
+        return False
+    roots = _app_roots()
+    parents = _parent_processes()
+    return any(_is_app(pid, started, roots, parents) for pid, started, _name in found)
+
+
+def _is_app(pid: int, started: int, roots: dict[int, int | None], parents: dict[int, int]) -> bool:
+    """Whether the process ``pid`` (started at ``started``) is the app: this process, the Workbench that started
+    it, or a child of either. Every step up the chain must have started before the one below it, so a process
+    number Windows gave to another program after its owner ended is never taken for the app."""
+
+    for _step in range(64):
+        if pid == os.getpid():
+            return True
+        if pid in roots and roots[pid] is not None and started and roots[pid] == started:
+            return True
+        parent = parents.get(pid, 0)
+        if parent <= 0 or parent == pid:
+            return False
+        parent_started = _process_start_time(parent)
+        if not parent_started or not started or parent_started > started:
+            return False
+        pid, started = parent, parent_started
+    return False
+
+
+def _parent_processes() -> dict[int, int]:
+    """Every running process's parent process number (Windows' process snapshot)."""
+
+    if os.name != "nt":
+        return {}
+    try:
+        import ctypes  # noqa: PLC0415
+        from ctypes import wintypes  # noqa: PLC0415
+
+        class ProcessEntry(ctypes.Structure):
+            _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD), ("th32ProcessID", wintypes.DWORD),
+                        ("th32DefaultHeapID", ctypes.c_size_t), ("th32ModuleID", wintypes.DWORD),
+                        ("cntThreads", wintypes.DWORD), ("th32ParentProcessID", wintypes.DWORD),
+                        ("pcPriClassBase", ctypes.c_long), ("dwFlags", wintypes.DWORD),
+                        ("szExeFile", wintypes.WCHAR * 260)]
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+        kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+        kernel32.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(ProcessEntry)]
+        kernel32.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(ProcessEntry)]
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        snapshot = kernel32.CreateToolhelp32Snapshot(0x2, 0)  # TH32CS_SNAPPROCESS
+        if not snapshot or snapshot == wintypes.HANDLE(-1).value:
+            return {}
+        try:
+            entry = ProcessEntry()
+            entry.dwSize = ctypes.sizeof(ProcessEntry)
+            parents: dict[int, int] = {}
+            more = kernel32.Process32FirstW(snapshot, ctypes.byref(entry))
+            while more:
+                parents[int(entry.th32ProcessID)] = int(entry.th32ParentProcessID)
+                more = kernel32.Process32NextW(snapshot, ctypes.byref(entry))
+            return parents
+        finally:
+            kernel32.CloseHandle(snapshot)
+    except Exception:  # noqa: BLE001 - without the snapshot nothing is taken for the app, and the wait applies
+        return {}
+
+
+def _process_start_time(pid: int) -> int | None:
+    """When process ``pid`` started (Windows' FILETIME count), or None when it cannot be read."""
+
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes  # noqa: PLC0415
+        from ctypes import wintypes  # noqa: PLC0415
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return None
+        try:
+            created, ended, kernel, user = (wintypes.FILETIME() for _ in range(4))
+            if not kernel32.GetProcessTimes(handle, ctypes.byref(created), ctypes.byref(ended), ctypes.byref(kernel),
+                                            ctypes.byref(user)):
+                return None
+            return (created.dwHighDateTime << 32) | created.dwLowDateTime
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+# The checked copy of a database (224, Wave B2a, F8) -------------------------------------------------
+
+
+def read_only_address(path: Path | str) -> str:
+    """The address SQLite opens ``path`` from without being able to change it. A network path
+    (``\\\\server\\share\\...``) needs ``file:////server/share/...``: SQLite refuses the ``file://server/...``
+    form that ``Path.as_uri`` gives it."""
+
+    resolved = Path(path).resolve()
+    text = str(resolved)
+    if text.startswith("\\\\"):
+        return "file:////" + quote(text.lstrip("\\").replace("\\", "/"), safe="/") + "?mode=ro"
+    return resolved.as_uri() + "?mode=ro"
+
+
+def table_counts(connection: sqlite3.Connection) -> dict[str, int]:
+    """How many rows every table of the database holds, by table name."""
+
+    names = [str(row[0]) for row in connection.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")]
+    return {name: int(connection.execute(f'SELECT COUNT(*) FROM "{name}"').fetchone()[0]) for name in names}
+
+
+def _backup_into(connection: sqlite3.Connection, partial: Path) -> None:
+    copy = sqlite3.connect(partial)
+    try:
+        connection.backup(copy)
+        # A backup is one file: a copy of a database kept in WAL mode would otherwise grow -wal and -shm files
+        # beside it the moment it is read.
+        copy.execute("PRAGMA journal_mode = DELETE")
+    finally:
+        copy.close()
+
+
+def _side_files(path: Path) -> list[Path]:
+    return [path, *(path.with_name(path.name + suffix) for suffix in ("-wal", "-shm", "-journal"))]
+
+
+def _copy_counts(partial: Path) -> dict[str, int] | None:
+    """The copy's table counts, or None when it does not pass SQLite's damage check or cannot be read."""
+
+    try:
+        check = sqlite3.connect(read_only_address(partial), uri=True)
+    except sqlite3.Error:
+        return None
+    try:
+        if [str(row[0]) for row in check.execute("PRAGMA integrity_check")] != ["ok"]:
+            return None
+        return table_counts(check)
+    except sqlite3.Error:
+        return None
+    finally:
+        check.close()
+
+
+def checked_copy(connection: sqlite3.Connection, target: Path | str, *, overwrite: bool = False,
+                 wait: float = SHORT_WAIT_SECONDS) -> dict[str, int]:
+    """A whole copy of the database ``connection`` has open, at ``target``, made with SQLite's own backup call.
+
+    The copy is made under a partial name beside ``target`` and checked there: it must pass SQLite's damage
+    check and hold as many rows in every table as the original did at the moment it was copied. Only then is it
+    given ``target``'s name, so a damaged, short or empty copy never looks like a backup. A file already at
+    ``target`` is never trusted: it is refused, or replaced when the caller says ``overwrite``. ``wait`` is
+    how long the rename waits for a program that holds the new copy for a moment. Returns the table counts the
+    copy was checked against."""
+
+    target = Path(target)
+    if target.exists() and not overwrite:
+        raise FileExistsError(
+            f"{target.name} is already there, so it was not taken as a backup and nothing was copied over it. "
+            f"({target})")
+    partial = target.with_name(target.name + ".partial")
+    for leftover in _side_files(partial):
+        remove(leftover)  # what an interrupted copy left behind is never reused
+    reading = not connection.in_transaction
+    try:
+        # One read covers the counts and the copy, so a write by another program in between cannot make a
+        # whole copy look short.
+        if reading:
+            connection.execute("BEGIN")
+        expected = table_counts(connection)
+        _backup_into(connection, partial)
+    finally:
+        if reading and connection.in_transaction:
+            connection.rollback()
+    try:
+        found = _copy_counts(partial)
+        if found != expected:
+            what = "it is damaged" if found is None else "its row counts differ from the original's"
+            raise CopyNotChecked(f"The copy of {target.name} did not check out ({what}), so it was not kept. "
+                                 f"({target})")
+        _with_wait(lambda: os.replace(partial, target), [partial, target], "replaced", wait, None, source=partial)
+    finally:
+        for leftover in _side_files(partial):
+            try:
+                leftover.unlink(missing_ok=True)
+            except OSError:
+                pass
+    return expected

@@ -1,0 +1,38 @@
+{
+  "repos": {
+    "example-org/example-project": {
+      "project_label": "Example App / Example Project",
+      "keywords": [
+        "Example App",
+        "dashboard",
+        "settings page",
+        "export button",
+        "sign-in screen",
+        "slowdown",
+        "crash on save"
+      ]
+    },
+    "Aintologic/media-manglers": {
+      "project_label": "Media Manglers",
+      "keywords": [
+        "Media Manglers",
+        "evidence package",
+        "transcript",
+        "marker audit",
+        "Whisper",
+        "frames",
+        "review package",
+        "Codex evidence package"
+      ]
+    },
+    "example-org/another-project": {
+      "project_label": "Another Project",
+      "keywords": [
+        "Another Project",
+        "command palette",
+        "keyboard shortcut",
+        "toolbar"
+      ]
+    }
+  }
+}

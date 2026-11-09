@@ -1,0 +1,50 @@
+{
+  "review_warning": "Repo routing hint only. Confirm with GitHub issue lookup before creating or updating tickets.",
+  "candidates": [
+    {
+      "evidence_id": "ticket-001",
+      "source_id": "fixture-source",
+      "source_filename": "fixture-session.mp4",
+      "source_path": "fixture-session.mp4",
+      "timestamp_start_seconds": 120,
+      "timestamp_end_seconds": 360,
+      "timestamp_start": "00:02:00.000",
+      "timestamp_end": "00:06:00.000",
+      "marker_timestamp": "00:03:20.000",
+      "confidence": "explicit",
+      "detected_marker_phrases": [
+        "make this a ticket"
+      ],
+      "supporting_marker_phrases": [
+        "dashboard"
+      ],
+      "transcript_excerpt": "Please make this a ticket for the dashboard sector color being wrong.",
+      "transcript_window_path": "evidence_items/ticket-001/transcript_window.md",
+      "frame_index_path": "evidence_items/ticket-001/frame_index.csv",
+      "audio_snippet": {
+        "relative_path": "evidence_items/ticket-001/audio_snippet.mp3",
+        "status": "created"
+      },
+      "frames": [
+        {
+          "relative_path": "evidence_items/ticket-001/frames/full/frame_0001.jpg",
+          "full_frame_path": "evidence_items/ticket-001/frames/full/frame_0001.jpg",
+          "timestamp": "00:03:20.000",
+          "panels": [
+            {
+              "role": "driver_view",
+              "relative_path": "evidence_items/ticket-001/frames/panels/driver_view/frame_0001_driver_view.jpg",
+              "panel_crop_path": "evidence_items/ticket-001/frames/panels/driver_view/frame_0001_driver_view.jpg"
+            }
+          ]
+        }
+      ],
+      "suggested_issue_title": "Fix dashboard sector color",
+      "likely_target_repo": "owner/example-repo",
+      "repo_confidence": "operator_specified",
+      "repo_hint_source": "operator_target",
+      "requires_github_review": true
+    }
+  ],
+  "review_needed": []
+}

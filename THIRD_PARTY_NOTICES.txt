@@ -1,0 +1,190 @@
+Third-Party Notices
+===================
+
+This repository contains original code plus documentation, smoke tests, and
+optional workflows that rely on third-party media, tools, or services.
+
+Repository code
+---------------
+
+The code in this repository is licensed under the Apache License, Version 2.0.
+See LICENSE for the repository license text.
+
+Optional tooling and services
+-----------------------------
+
+Media Manglers can use third-party tools and services that are not owned by
+this repository.
+
+Examples include:
+
+- FFmpeg for media processing
+- Whisper for local transcription and some local translation paths
+- yt-dlp for supported remote media downloads and metadata retrieval
+- Argos Translate for free local translation to non-English targets
+- OpenAI for optional cloud translation when you configure an API key
+
+Practical notes:
+
+- These tools and services are separate from the Apache License 2.0 that covers this
+  repository's code.
+- OpenAI is optional and not bundled with the repo.
+- OpenAI API usage depends on your own account, key, pricing, and service
+  terms.
+- Generated transcripts and translations should be reviewed before you rely on
+  them for publication or downstream work.
+
+Bundled with the packaged Workbench
+-----------------------------------
+
+This section applies only to the packaged Workbench folder: the folder that
+holds VideoManglerWorkbench.exe and its _internal folder. The Video Mangler and
+Audio Mangler scripts, and their release ZIPs, bundle none of these. The
+licence texts named below are in the licenses folder beside
+VideoManglerWorkbench.exe.
+
+1. Qt for Python (PySide6) 6.11.1 and Shiboken 6.11.1, with the Qt 6.11.1
+   libraries and plugins they carry: Qt6Core, Qt6Gui, Qt6Widgets,
+   Qt6Multimedia, Qt6MultimediaWidgets, Qt6Network, Qt6OpenGL, Qt6Pdf,
+   Qt6Qml, Qt6QmlMeta, Qt6QmlModels, Qt6QmlWorkerScript, Qt6Quick, Qt6Svg,
+   pyside6.abi3.dll, shiboken6.abi3.dll and the plugins under
+   _internal\PySide6\plugins.
+   - Licence: GNU Lesser General Public License version 3. The PySide6 wheels
+     declare "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"; this package uses
+     them under the LGPL-3.0.
+   - Texts: licenses\LGPL-3.0.txt, and licenses\GPL-3.0.txt, which the LGPL-3.0
+     adds its permissions to.
+   - Source: https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.11.1-src/
+     and https://download.qt.io/official_releases/qt/6.11/6.11.1/single/
+   - The Qt libraries contain third-party code (for example libjpeg, libpng,
+     FreeType, HarfBuzz, PCRE2 and PDFium) under its own licences. Each one's
+     licence statement, for the Qt modules in this package, is in
+     licenses\Qt-third-party.txt, copied from
+     https://doc.qt.io/qt-6.11/licenses-used-in-qt.html
+
+2. FFmpeg 7.1.3 libraries, as shipped inside Qt Multimedia: avcodec-61.dll,
+   avformat-61.dll, avutil-59.dll, swresample-5.dll and swscale-8.dll in
+   _internal\PySide6. Qt Multimedia's FFmpeg backend
+   (_internal\PySide6\plugins\multimedia\ffmpegmediaplugin.dll) uses them for
+   the built-in player.
+   - Licence: GNU Lesser General Public License version 2.1 or later. They are
+     built without FFmpeg's GPL or non-free parts.
+   - Text: licenses\LGPL-2.1.txt. They link zlib 1.3.1: licenses\zlib.txt.
+   - Source: https://ffmpeg.org/releases/ffmpeg-7.1.3.tar.xz
+   - These libraries are not the ffmpeg.exe and ffprobe.exe programs that the
+     reviews use. Those are installed separately (see "Optional tooling and
+     services" above) and are not part of the package.
+
+3. The Python 3.12.10 runtime: python312.dll, python3.dll and the standard
+   library, with SQLite 3.49.1 (sqlite3.dll), OpenSSL 3.0.16 (libcrypto-3.dll),
+   libffi (libffi-8.dll), bzip2 and xz, and the Microsoft Visual C++ runtime
+   (VCRUNTIME140*.dll, MSVCP140*.dll, ucrtbase.dll and api-ms-win-*.dll).
+   - Licence: the Python Software Foundation License Version 2. Its text is in
+     licenses\Python-LICENSE.txt, copied from the Python runtime the package
+     was built with. That file also carries the bzip2, libffi and OpenSSL
+     (Apache License 2.0) terms, and the conditions for redistributing the
+     Microsoft Distributable Code.
+   - SQLite is in the public domain. The licences of the other software
+     Python includes (among them OpenSSL, expat, zlib and libmpdec) are in
+     licenses\Python-incorporated-software.txt, copied from Python 3.12.10's
+     own documentation (https://docs.python.org/3.12/license.html).
+
+4. Mesa llvmpipe software OpenGL (opengl32sw.dll in _internal\PySide6), which
+   Qt ships for PCs without OpenGL drivers.
+   - Licence: MIT. Text: licenses\Mesa-MIT.txt; see also
+     https://docs.mesa3d.org/license.html
+
+5. The PyInstaller 6.21.0 bootloader inside VideoManglerWorkbench.exe.
+   - Licence: GNU General Public License version 2 or later, with the
+     PyInstaller bootloader exception, which allows programs built with it to
+     be distributed under any licence. Text: licenses\PyInstaller-COPYING.txt.
+
+Replacing the LGPL libraries:
+
+- The package is a folder, not a single file, so every Qt and FFmpeg library
+  above is a separate file that you can replace with your own build.
+- Replace the file of the same name in _internal\PySide6 (Qt and FFmpeg, and
+  the plugins below it) or _internal\shiboken6 with a 64-bit Windows build of
+  the same version series: Qt 6.11.x, or FFmpeg 7.1.x with avcodec-61,
+  avformat-61, avutil-59, swresample-5 and swscale-8.
+- The Workbench does not check these files when it starts. The build checks
+  them only while the package is being made.
+- You can also rebuild the whole package from this repository's source with
+  tools\gui\Build-VideoManglerWorkbench.ps1.
+
+Left out of the package: Qt Virtual Keyboard, which is offered only under the
+GPL-3.0 and which the Workbench does not use, and Qt's OpenSSL TLS backend. Qt
+uses Windows' own TLS without it.
+
+NASA and Wikimedia Commons sample media
+---------------------------------------
+
+The video docs and smoke tests reference a short NASA balloon clip that is also
+mirrored on Wikimedia Commons.
+
+Referenced pages:
+
+- https://commons.wikimedia.org/wiki/File%3ANASA%27s_Scientific_Balloon_Program_%28SVS14429_NASA_Balloon_Program_YT%29.webm
+- https://svs.gsfc.nasa.gov/14429
+- https://svs.gsfc.nasa.gov/vis/a010000/a014400/a014429/14429_NASA_Balloon_Program_YT.webm
+
+Practical notes:
+
+- Wikimedia Commons describes this specific NASA video as public domain in the
+  United States.
+- NASA logos, insignia, and emblems remain restricted.
+- Treat the repo code license and any referenced sample-media license as
+  separate things.
+
+Blender open movie sample media
+-------------------------------
+
+The video docs also reference Blender open movie media such as Tears of Steel
+and Sintel.
+
+Referenced pages:
+
+- https://mango.blender.org/about/
+- https://durian.blender.org/sharing/
+- https://studio.blender.org/remixing/
+
+Practical notes:
+
+- Blender project pages describe the film results as Creative Commons
+  Attribution 3.0.
+- Project pages also call out exceptions for trademarks, logos, title
+  treatments, and some soundtrack or music materials.
+- If you redistribute Blender sample media or derivatives, follow the
+  attribution and project-specific conditions from the upstream pages.
+
+LibriVox and Internet Archive sample audio
+------------------------------------------
+
+The audio docs and smoke tests reference public-domain LibriVox recordings,
+including:
+
+- https://librivox.org/the-gettysburg-address-by-abraham-lincoln-version-2
+- https://archive.org/download/gettysburg_johng_librivox/gettysburg_address.mp3
+- https://ia801802.us.archive.org/11/items/multilingual028_2103_librivox/msw028_10_maravigliosamente_jacopodalentini_le_128kb.mp3
+
+Practical notes:
+
+- LibriVox presents these recordings as public-domain recordings.
+- Internet Archive hosts mirrors and downloadable files for those recordings.
+- Treat the repo code license and the upstream recording status as separate
+  things.
+
+Remote site content
+-------------------
+
+When you point either app at YouTube or another supported remote source, the
+media, metadata, and public comments remain subject to that source platform and
+the rights status of the underlying content.
+
+General rule
+------------
+
+Do not assume that referenced media, metadata, or third-party services become
+Apache 2.0 licensed just because this repository is Apache 2.0 licensed.
+If you redistribute any referenced media or exported content, follow the
+upstream terms for that specific source.

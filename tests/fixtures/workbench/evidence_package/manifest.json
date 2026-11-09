@@ -1,0 +1,30 @@
+{
+  "package_type": "codex-evidence-package",
+  "candidate_count": 1,
+  "review_needed_count": 1,
+  "repo_hint_summary": {
+    "candidate_count": 1,
+    "requires_github_review_count": 1,
+    "target_repo_counts": {
+      "owner/example-repo": 1
+    }
+  },
+  "sources": [
+    {
+      "source_id": "fixture-source",
+      "source_filename": "fixture-session.mp4",
+      "status": "completed"
+    }
+  ],
+  "review_needed": [
+    {
+      "review_id": "review-001",
+      "reason": "implicit_issue_with_ui_or_domain_context",
+      "source_filename": "fixture-session.mp4",
+      "timestamp_start": "00:07:00.000",
+      "timestamp_end": "00:08:00.000",
+      "transcript_excerpt": "The dashboard label is hard to read here.",
+      "visual_followup_required": true
+    }
+  ]
+}
