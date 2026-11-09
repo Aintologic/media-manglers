@@ -9,7 +9,7 @@ transcripts, screenshots, clips, packages and edited videos that you *and* your
 AI agent can work with.
 
 [![Version v0.11.0 beta](https://img.shields.io/badge/version-v0.11.0%20beta-1f8fbf)](docs/release-notes/RELEASE_NOTES_v0.11.0.txt)
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
+[![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078d4)](#download-and-documentation)
 
 **[Download (coming soon)](#download-and-documentation)** ·
@@ -82,4 +82,17 @@ describe it, build it.
 
 ## License
 
-Apache 2.0. See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).
+Free to download is not the same as "do anything you like". In short:
+
+- **Code, documentation text and screenshots**: GNU **AGPL-3.0-or-later**.
+  See [`LICENSE`](LICENSE).
+- **Third-party parts** that the packaged Workbench bundles (Qt for Python, the
+  FFmpeg libraries inside Qt, the Python runtime and others): their **own
+  licenses**. See [`THIRD_PARTY_NOTICES.txt`](THIRD_PARTY_NOTICES.txt) and the
+  [`licenses`](licenses/) folder.
+- **Names and logos**: the AÏntologic name and logos; the Media Manglers,
+  Video Mangler, Audio Mangler and Video Mangler Workbench names; and the app
+  icons in [`assets/`](assets/) are **not** covered by the AGPL. See
+  [`TRADEMARKS.md`](TRADEMARKS.md).
+
+Copyright 2026 Media Manglers Contributors.

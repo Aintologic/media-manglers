@@ -78,5 +78,5 @@ confidential output.
 License
 -------
 
-Repository code: Apache License 2.0
+Repository code: GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later)
 Third-party notices: ../../THIRD_PARTY_NOTICES.txt
