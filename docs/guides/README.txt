@@ -22,10 +22,10 @@ Audio Mangler
 Download
 --------
 
-Releases (the first public release is coming soon):
+Releases:
   https://github.com/Aintologic/media-manglers/releases
 
-Most users should download VideoManglerWorkbench-vX.Y.Z.zip. Extract the
+Most users should download VideoManglerWorkbench-vX.Y.Z-windows-x64.zip. Extract the
 complete ZIP and keep its executable, engine, Help, and runtime files together.
 
 Documentation

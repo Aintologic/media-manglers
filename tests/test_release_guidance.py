@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 import unittest
 
 
@@ -53,12 +54,37 @@ class ReleaseGuidanceTests(unittest.TestCase):
         )
 
     def test_readme_release_badge_is_static_and_shows_the_current_version(self) -> None:
-        # The badge names the version itself rather than looking a release up on GitHub (no public
-        # release exists yet), so it has to move with VERSION.
+        # The badge names the version itself rather than looking a release up on GitHub, so it has
+        # to move with VERSION.
         version = (self.repo_root / "VERSION").read_text(encoding="utf-8").strip()
         readme = self._read_text("README.md")
         self.assertIn(f"https://img.shields.io/badge/version-v{version}%20", readme)
         self.assertNotIn("img.shields.io/github/", readme)
+
+    def test_readme_badge_and_download_point_to_the_release(self) -> None:
+        # The version badge opens that version's release, and Download opens the Releases page.
+        version = (self.repo_root / "VERSION").read_text(encoding="utf-8").strip()
+        readme = self._read_text("README.md")
+        releases = "https://github.com/Aintologic/media-manglers/releases"
+        badge = re.compile(
+            rf"\[!\[Version v{re.escape(version)}[^\]]*\]"
+            rf"\(https://img\.shields\.io/badge/version-v{re.escape(version)}%20[^)]*\)\]"
+            rf"\({re.escape(releases)}/tag/v{re.escape(version)}\)"
+        )
+        self.assertRegex(readme, badge)
+        self.assertIn(f"**[Download]({releases})**", readme)
+
+    def test_no_guide_still_says_the_first_release_is_coming(self) -> None:
+        for relative_path in (
+            "README.md",
+            "docs/README.md",
+            "docs/guides/README.txt",
+            "docs/workbench/GETTING_STARTED.md",
+            "docs/release-notes/RELEASE_NOTES_v0.11.0.txt",
+        ):
+            with self.subTest(path=relative_path):
+                text = " ".join(self._read_text(relative_path).split()).lower()
+                self.assertNotIn("coming soon", text)
 
     def test_packaged_validation_watchdog_scripts_are_tracked(self) -> None:
         self.assertTrue((self.repo_root / "tools" / "validation" / "PackagedRunWatchdog.ps1").exists())
