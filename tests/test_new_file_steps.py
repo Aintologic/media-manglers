@@ -160,6 +160,20 @@ class StopAtOnceTests(FileStepCase):
         self.assertIn("read-only", str(caught.exception))
         self.assertTrue(target.exists())
 
+    def test_another_read_only_file_in_the_folder_does_not_stop_a_real_hold_early(self) -> None:
+        folder = self.root / "addons" / "sp-1"
+        notes = self._file("addons/sp-1/notes.txt")
+        os.chmod(notes, stat.S_IREAD)
+        held = self._file("addons/sp-1/torch.dll")
+        clock = StepClock()
+        with OutsideHolder(folder, folder=True, forever=True) as holder:
+            with self.assertRaises(FileInUse):
+                safe_write.rename_into_place(folder, self.root / "addons" / "sp-2", budget=StepBudget(clock=clock),
+                                             pause=clock.pause)
+        self.assertAlmostEqual(clock.now - 1000.0, 10.0, places=6, msg="it waited the full ten seconds")
+        self.assertTrue(held.exists() and notes.exists())
+        self.assertIsNotNone(holder.pid)
+
     def test_a_file_the_app_itself_holds_stops_at_once(self) -> None:
         target = self._file("addons/sp-1/torch.dll")
         clock = StepClock()

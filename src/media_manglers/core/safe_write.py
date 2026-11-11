@@ -597,11 +597,14 @@ def _with_budget(step: Callable[[], T], paths: list[Path], done: str, budget: St
 
 
 def _read_only_path(exc: OSError, paths: list[Path]) -> Path | None:
-    """The file Windows refused because it is marked read-only, if that is why: waiting cannot help with it."""
+    """The file Windows refused because it is marked read-only, if that is why: waiting cannot help with it.
+
+    Only the file Windows named, or the step's own target, is looked at: another read-only file elsewhere in a
+    folder says nothing about why this one was refused, and a real hold must still be waited for."""
 
     if os.name != "nt" or getattr(exc, "winerror", None) != _ACCESS_DENIED:
         return None
-    for candidate in [exc.filename, *paths]:
+    for candidate in [exc.filename, paths[0] if paths else None]:
         if not candidate:
             continue
         try:

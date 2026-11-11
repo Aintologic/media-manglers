@@ -382,7 +382,8 @@ def _model_row(key: str, model: str, purpose: str, state: dict[str, object], *, 
             "This Whisper does not know a model by that name. Choose another Whisper model in Settings."), {
             "action_label": "Install guide", "action_kind": "install_guide"}
     else:
-        status, detail, actions = "needs_setup", (
+        # Not answered: nothing is known, so nothing is blocked here; a run's own check refuses a missing model.
+        status, detail, actions = "not_checked", (
             "Not checked: the Python that runs Whisper could not check its models. Fix the rows above, then "
             "Refresh readiness."), {}
     return _dependency(
