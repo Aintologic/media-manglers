@@ -135,6 +135,7 @@ def _script_table(script_name: str) -> dict[str, dict[str, object]]:
         foreach ($key in @('ffmpeg', 'ffprobe', 'ytdlp', 'python', 'whisper')) {{
             $source = Get-ToolSource -Key $key
             $table[$key] = @{{ Name = $source.Name; Page = $source.Page; WingetId = $source.WingetId;
+                Bundled = [string]$source.Bundled;
                 Standard = @($source.Standard | ForEach-Object {{ ,@($_[0], $_[1]) }}) }}
         }}
         $table | ConvertTo-Json -Depth 5 -Compress
@@ -161,6 +162,8 @@ class ScriptTableTests(unittest.TestCase):
                     source = TOOL_SOURCES[key]
                     self.assertEqual(entry["Page"], source.page)
                     self.assertEqual(entry["WingetId"], source.winget_id)
+                    # Installer plan, Stage 1: where Media Manglers' own copy sits.
+                    self.assertEqual(entry["Bundled"], source.bundled)
                     standard = [tuple(item) for item in (entry["Standard"] or [])]
                     self.assertEqual(standard, list(source.standard))
 

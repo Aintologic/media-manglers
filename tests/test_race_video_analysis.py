@@ -36,6 +36,7 @@ from media_manglers.core.race_video.review import (  # noqa: E402
     word_cut_by,
 )
 from media_manglers.core.race_video.timeline import SCHEMA  # noqa: E402
+from tests.whisper_test_models import checked_whisper  # noqa: E402
 
 FFMPEG = shutil.which("ffmpeg")
 FFPROBE = shutil.which("ffprobe")
@@ -437,7 +438,7 @@ class AnalysisTests(unittest.TestCase):
             def load_model(name, device=None):
                 return Model()
 
-        with patch.dict(sys.modules, {"whisper": Whisper()}):
+        with patch.dict(sys.modules, {"whisper": checked_whisper(Whisper())}):
             report = cut_points(project, version, ffmpeg=FFMPEG, whisper={"prefer_gpu": False, "language_code": "en"})
         by_edge = {entry["edge"]: entry for entry in report}
         self.assertEqual(by_edge["in"]["cuts_a_word"], "Here", "a cut while the microphone sounds is still flagged")

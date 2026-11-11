@@ -1,8 +1,10 @@
-"""Where each outside tool comes from, and where the Workbench looks for it (188).
+"""Where each tool comes from, and where the Workbench looks for it (188; installer plan, Stage 1).
 
 One table for every tool the Workbench and the scripts use: its official page, its Windows Package
-Manager package when there is one, and the folders its own installer puts it in. The lookup order
-is the same everywhere: the path the user chose, then PATH, then those folders. There are no
+Manager package when there is one, the folders its own installer puts it in, and, for FFmpeg, FFprobe
+and Python, where Media Manglers' own copy sits in the packaged application folder's ``runtime``
+folder. The lookup order is the same everywhere: the path the user chose, then (for FFprobe) the file
+beside the FFmpeg in use, then Media Manglers' own copy, then PATH, then those folders. There are no
 folders from one machine. Nothing here downloads, installs or changes anything.
 
 The scripts carry the same table and order in PowerShell (`Get-ToolSource` and
@@ -31,6 +33,9 @@ class ToolSource:
     # The tool's own install folders, as patterns under an environment folder. Each is
     # (environment variable, pattern below it); a pattern may hold * wildcards.
     standard: tuple[tuple[str, str], ...] = ()
+    # Where Media Manglers' own copy sits, below the packaged application folder's runtime folder;
+    # "" for a tool it does not ship.
+    bundled: str = ""
 
     @property
     def winget_command(self) -> str:
@@ -60,6 +65,7 @@ TOOL_SOURCES: dict[str, ToolSource] = {
             ("ffmpeg.exe", "ffmpeg"),
             _links("ffmpeg.exe")
             + ((_WINGET_PACKAGES[0], rf"{_WINGET_PACKAGES[1]}\Gyan.FFmpeg_*\ffmpeg-*\bin\ffmpeg.exe"),),
+            bundled=r"ffmpeg\bin\ffmpeg.exe",
         ),
         ToolSource(
             "ffprobe",
@@ -69,6 +75,7 @@ TOOL_SOURCES: dict[str, ToolSource] = {
             ("ffprobe.exe", "ffprobe"),
             _links("ffprobe.exe")
             + ((_WINGET_PACKAGES[0], rf"{_WINGET_PACKAGES[1]}\Gyan.FFmpeg_*\ffmpeg-*\bin\ffprobe.exe"),),
+            bundled=r"ffmpeg\bin\ffprobe.exe",
         ),
         ToolSource(
             "ytdlp",
@@ -90,6 +97,7 @@ TOOL_SOURCES: dict[str, ToolSource] = {
                 ("LOCALAPPDATA", r"Python\pythoncore-3*\python.exe"),
                 ("ProgramFiles", r"Python3*\python.exe"),
             ),
+            bundled=r"python\python.exe",
         ),
         ToolSource(
             "powershell",
@@ -134,9 +142,64 @@ def needs_download(dependency: object) -> bool:
     )
 
 
+def bundled_tools_dir(executable: str | None = None) -> Path:
+    """Media Manglers' own tools folder, ``<app folder>\\runtime``, anchored on the program's own folder: never
+    on the current folder or the ``MEDIA_MANGLERS_WORKBENCH_ROOT`` override. A source run has none."""
+
+    from media_manglers.core.private_runtime import runtime_folder  # noqa: PLC0415
+
+    return runtime_folder(executable)
+
+
+def bundled_tool(key: str, bundled_dir: str | os.PathLike[str] | None) -> str:
+    """Where Media Manglers' own copy of ``key`` would sit in ``bundled_dir``; "" for a tool it does not ship."""
+
+    source = TOOL_SOURCES.get(key)
+    if not bundled_dir or source is None or not source.bundled:
+        return ""
+    return str(Path(bundled_dir) / source.bundled)
+
+
+# What each row says about where a tool came from (installer plan, Stage 1).
+FOUND_BUNDLED = "Bundled with Media Manglers"
+FOUND_DOWNLOADED = "Downloaded by Media Manglers"
+FOUND_CHOSEN = "Your chosen path"
+FOUND_ON_PC = "Already on this PC"
+FOUND_WINDOWS = "Part of Windows"
+
+
+def _inside(path: str, folder: str | os.PathLike[str] | None) -> bool:
+    if not path or not folder:
+        return False
+    item = os.path.normcase(os.path.abspath(path))
+    root = os.path.normcase(os.path.abspath(str(folder))).rstrip("\\/")
+    return item.startswith(root + os.sep)
+
+
+def found_by_text(path: str, *, chosen: str = "", bundled_dir: str | os.PathLike[str] | None = None,
+                  downloaded_dir: str | os.PathLike[str] | None = None,
+                  environ: Mapping[str, str] | None = None) -> str:
+    """Where the tool at ``path`` came from, in the words a readiness row shows; "" when nothing was found."""
+
+    path = str(path or "").strip().strip('"')
+    if not path:
+        return ""
+    environ = os.environ if environ is None else environ
+    chosen = str(chosen or "").strip().strip('"')
+    if chosen and os.path.normcase(os.path.abspath(chosen)) == os.path.normcase(os.path.abspath(path)):
+        return FOUND_CHOSEN
+    if _inside(path, bundled_dir):
+        return FOUND_BUNDLED
+    if _inside(path, downloaded_dir):
+        return FOUND_DOWNLOADED
+    if _inside(path, environ.get("SystemRoot") or ""):
+        return FOUND_WINDOWS
+    return FOUND_ON_PC
+
+
 @dataclass(frozen=True, slots=True)
 class ToolLookup:
-    """Where a tool was found: "chosen", "beside FFmpeg", "PATH", "standard", or "" for not found."""
+    """Where a tool was found: "chosen", "beside FFmpeg", "bundled", "PATH", "standard", or "" for not found."""
 
     path: str = ""
     found_by: str = ""
@@ -185,12 +248,14 @@ def find_tool(
     chosen: str = "",
     *,
     beside: str = "",
+    bundled_dir: str | os.PathLike[str] | None = None,
     which: Callable[[str], str | None] = shutil.which,
     is_file: Callable[[str], bool] = os.path.isfile,
     environ: Mapping[str, str] | None = None,
     expand: Callable[[str], list[str]] = glob.glob,
 ) -> ToolLookup:
-    """The chosen path, then (for FFprobe) beside FFmpeg, then PATH, then the standard folders."""
+    """The chosen path, then (for FFprobe) beside the FFmpeg in use, then Media Manglers' own copy in
+    ``bundled_dir`` (``bundled_tools_dir()``), then PATH, then the standard folders."""
 
     source = TOOL_SOURCES[key]
     chosen = str(chosen or "").strip().strip('"')
@@ -199,11 +264,16 @@ def find_tool(
         if is_file(chosen):
             return ToolLookup(chosen, "chosen")
         chosen_missing = chosen
+    bundled = bundled_tool(key, bundled_dir)
     if beside and Path(beside).is_absolute():
-        # FFprobe ships in the same folder as FFmpeg, as the scripts and the helpers expect.
+        # FFprobe ships in the same folder as FFmpeg, as the scripts and the helpers expect. Beside our own
+        # FFmpeg that is our own FFprobe.
         sibling = Path(beside).parent / ("ffprobe.exe" if beside.lower().endswith(".exe") else "ffprobe")
         if is_file(str(sibling)):
-            return ToolLookup(str(sibling), "beside FFmpeg", chosen_missing)
+            same = bool(bundled) and os.path.normcase(str(sibling)) == os.path.normcase(bundled)
+            return ToolLookup(str(sibling), "bundled" if same else "beside FFmpeg", chosen_missing)
+    if bundled and is_file(bundled):
+        return ToolLookup(bundled, "bundled", chosen_missing)
     for command in source.commands:
         resolved = which(command)
         if resolved:

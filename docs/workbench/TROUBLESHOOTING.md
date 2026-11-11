@@ -101,8 +101,26 @@ missing.
 
 ### Whisper model downloads
 
-A model is downloaded only after explicit approval of the explanation and
-storage impact. Readiness alone never downloads it.
+A model is downloaded only after you approve it with **Approve download** in
+**Settings > Dependencies**, in every feature. Readiness alone never downloads
+it. If a run, a scan or the AI Video Editor stops with "The Whisper model … is
+not on this PC yet", approve that model there and run again. A model that does
+not match the file Whisper published is not used, and it is never replaced
+without that approval. A background job, such as the waveforms, skips listening
+instead of asking, and listens once the model is there.
+
+### Media Manglers is already open
+
+Only one Workbench runs at a time, because every copy on this PC shares one
+library and one settings folder. Switch to the window that is open.
+
+### A file held by another program during a download or setup step
+
+A download, or a step that unpacks or removes Media Manglers' own downloaded
+files, waits at most ten seconds for a file another program has open (often a
+virus scanner looking at a new file), and thirty seconds for the whole step.
+If the file is still held, the step stops, names the program, and nothing is
+lost. Wait a moment, or close that program, and try again.
 
 ### CUDA and CPU fallback
 

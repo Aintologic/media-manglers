@@ -12,8 +12,10 @@ from .contracts import CommandResult, read_json_file, write_json_file
 from .core.readmes import write_package_readme_from_request
 from .core.race_video import requests as race_video
 from .core import (
+    app_locks,
     archive_catalog,
     evidence_package,
+    file_steps,
     frame_render,
     inbox_records,
     review_finalization,
@@ -26,7 +28,9 @@ from .core import (
     review_relocation,
     review_results,
     review_targeted_evidence,
+    safe_write,
     narration_evidence,
+    private_runtime,
     raw_bin_library,
     scratch,
     user_folders,
@@ -35,6 +39,7 @@ from .core import (
     transcript_only,
     speech_facts,
     voice_track,
+    whisper_models,
     cross_track_check,
 )
 from .providers import argos_local, hybrid_text, whisper_local
@@ -217,6 +222,8 @@ def build_parser() -> argparse.ArgumentParser:
         "raw-bin-deep-scan",
         "raw-bin-reapply",
         "track-levels",
+        "whisper-models",
+        "whisper-model-download",
     ):
         command = subparsers.add_parser(
             name,
@@ -225,7 +232,44 @@ def build_parser() -> argparse.ArgumentParser:
         command.add_argument("--request-file", required=True)
         command.add_argument("--result-file", required=True)
 
+    # Installer plan, Stage 2: new file steps for programs that are not Python (the uninstaller's
+    # "file-step remove-addons"), through the one shared helper.
+    file_step = subparsers.add_parser(FILE_STEP, help="Run a new file step through the shared safe file helper.")
+    file_step.add_argument("action", choices=("remove-addons", "run"))
+    file_step.add_argument("--request-file", default="")
+    file_step.add_argument("--result-file", default="")
+
     return parser
+
+
+FILE_STEP = "file-step"
+
+
+def _file_step(args: argparse.Namespace) -> int:
+    """0 when the step succeeded; 2 when another program still holds a file; 1 for any other refusal. The result
+    goes to ``--result-file``, or to standard output as one line of JSON."""
+
+    code = 0
+    try:
+        if args.action == "remove-addons":
+            data = file_steps.remove_addons()
+        else:
+            if not args.request_file:
+                raise ValueError("file-step run needs --request-file with the steps to carry out.")
+            payload = read_json_file(args.request_file).get("payload") or {}
+            data = {"steps": file_steps.run_steps(list(payload.get("steps") or []))}
+        result = CommandResult(ok=True, data=data, error="")
+    except safe_write.FileInUse as exc:
+        code = 2
+        result = CommandResult(ok=False, data={"holders": file_steps.holder_data(exc)}, error=str(exc))
+    except (OSError, ValueError, KeyError) as exc:
+        code = 1
+        result = CommandResult(ok=False, data={}, error=str(exc))
+    if args.result_file:
+        write_json_file(args.result_file, result.to_dict())
+    else:
+        print(json.dumps(result.to_dict(), ensure_ascii=False), flush=True)
+    return code
 
 
 def _build_handlers() -> dict[str, Handler]:
@@ -301,15 +345,26 @@ def _build_handlers() -> dict[str, Handler]:
         "raw-bin-reapply": raw_bin_library.reapply_from_request,
         # 125, 135 (Wave 8): the sound level of every track, for the player's waveform lanes.
         "track-levels": track_levels.measure_from_request,
+        # Installer plan, Stage 3: which Whisper models are on this PC and right (reads only), and the download
+        # the operator approved (only the approval runs it).
+        "whisper-models": whisper_models.status_from_request,
+        "whisper-model-download": whisper_models.download_from_request,
     }
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    # Installer plan, Stage 1: our own Python gets our downloaded speech libraries before any command runs;
+    # a Python already on the PC is left exactly as it is.
+    private_runtime.use_addons()
+    # Installer plan, Stage 2: every helper run holds this, so the installer can see Media Manglers is running.
+    app_locks.hold_running_lock()
     parser = build_parser()
     args = parser.parse_args(argv)
     if not args.command:
         parser.print_help()
         return 0
+    if args.command == FILE_STEP:
+        return _file_step(args)
 
     # 196: the helper's own temporary files follow MEDIA_MANGLERS_SCRATCH_ROOT when it is set.
     scratch.use_scratch_root()

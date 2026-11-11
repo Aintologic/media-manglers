@@ -20,6 +20,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ("Video Mangler.ps1", "Audio Mangler.ps1")
 FUNCTIONS = (
     "Get-ToolSource",
+    # Installer plan, Stage 1: the bundled copy's step. The harness has no runtime folder beside it, so these
+    # cases prove the order without one; tests/test_own_tools_first.py covers the bundled copy.
+    "Get-BundledToolsRoot",
+    "Get-BundledToolPath",
     "Get-ToolStandardLocations",
     "Get-ToolGetItText",
     "Resolve-ExecutablePath",

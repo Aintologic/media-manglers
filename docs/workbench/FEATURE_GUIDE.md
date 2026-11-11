@@ -310,7 +310,9 @@ app**. **Settings > Video player > Play videos with** sets the usual choice.
 - **Missing tools.** A bar at the top of the window names any required tool
   that is missing, with **Download**, **Open Settings > Dependencies** and **Not
   now**. In **Settings > Dependencies**, **Copy winget command** copies the
-  install command. The app never downloads or installs anything itself.
+  install command. The app never downloads or installs a tool itself, and it
+  downloads a Whisper model only when you approve it in **Settings >
+  Dependencies**.
 - **Text size** (Settings > General / Startup): **100%**, **110%**, **125%** or
   **150%**, for the whole app at once. **Ctrl+Plus**, **Ctrl+Minus** and
   **Ctrl+0** change it on any page and in the player.

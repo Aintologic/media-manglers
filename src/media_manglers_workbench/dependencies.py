@@ -14,9 +14,11 @@ import threading
 import time
 from typing import Callable
 
+from media_manglers.core.user_folders import addons_root
+
 from .play_targets import find_vlc
 from .resources import DependencyStatus, RuntimeResources
-from .tool_sources import TOOL_SOURCES, standard_locations
+from .tool_sources import FOUND_BUNDLED, FOUND_DOWNLOADED, FOUND_ON_PC, TOOL_SOURCES, bundled_tool, found_by_text, standard_locations
 
 
 CommandRunner = Callable[[list[str], int, dict[str, str] | None], subprocess.CompletedProcess[str]]
@@ -222,16 +224,30 @@ def _chosen_or_found(configured: str, found: str) -> tuple[str, str]:
 
 _PYTHON_PROBE = r"""
 import importlib.metadata
+import importlib.util
 import json
 import os
 from pathlib import Path
 import sys
 from urllib.parse import urlparse
 
+private_python = False
+try:
+    # Installer plan, Stage 1: our own Python gets our downloaded speech libraries first, as every helper
+    # run does (media_manglers.cli.main); any other Python is left exactly as it is.
+    from media_manglers.core.private_runtime import is_private_python, use_addons
+    use_addons()
+    private_python = bool(is_private_python())
+except Exception:
+    pass
+
 model_name = sys.argv[1]
 result = {
     "python_path": sys.executable,
     "python_version": sys.version.split()[0],
+    "private_python": private_python,
+    "argos_available": importlib.util.find_spec("argostranslate") is not None,
+    "torch_path": "",
     "helper_import_ok": False,
     "whisper_import_ok": False,
     "whisper_version": "",
@@ -269,6 +285,7 @@ except Exception as exc:
 try:
     import torch
     result["torch_import_ok"] = True
+    result["torch_path"] = str(getattr(torch, "__file__", "") or "")
     result["torch_version"] = str(getattr(torch, "__version__", "") or "")
     result["cuda_version"] = str(getattr(torch.version, "cuda", "") or "")
     result["cuda_available"] = bool(torch.cuda.is_available())
@@ -277,6 +294,110 @@ except Exception as exc:
     result["error"] += (" | " if result["error"] else "") + "Torch import failed: " + str(exc)
 print(json.dumps(result), flush=True)
 """
+
+
+# Installer plan, Stage 3: whether each model a workflow will load is on this PC and is the file Whisper published.
+# It runs once, in the Python that will run Whisper, through the same check every feature's load goes through
+# (whisper_models), reading Whisper's model table without importing PyTorch. It never downloads anything.
+_MODEL_PROBE = r"""
+import json
+import sys
+try:
+    from media_manglers.core.private_runtime import use_addons
+    use_addons()
+except Exception:
+    pass
+from media_manglers.core.whisper_models import model_state, model_table
+table = model_table()
+print(json.dumps({name: model_state(name, table=table).to_dict() for name in sys.argv[1:]}), flush=True)
+"""
+
+# The models a workflow will load: the selected model; base.en, which every review's voice detection uses; and the
+# AI Video Editor's quick-pass model. (row key, what it is for)
+MODEL_ROWS = (
+    ("whisper_model", "Transcripts with the selected model."),
+    ("whisper_model_voice", "Finds which track is your voice, in every review and scan."),
+    ("whisper_model_quick", "The AI Video Editor's quick passes over a whole race."),
+)
+VOICE_MODEL = "base.en"
+
+
+def required_models(selected_model: str, quick_model: str = "") -> list[tuple[str, str, str]]:
+    """(row key, model, purpose) for each model a workflow will load, each model once."""
+
+    rows: list[tuple[str, str, str]] = []
+    seen: set[str] = set()
+    for (key, purpose), model in zip(MODEL_ROWS, (selected_model, VOICE_MODEL, quick_model)):
+        model = str(model or "").strip()
+        if model and model.casefold() not in seen:
+            seen.add(model.casefold())
+            rows.append((key, model, purpose))
+    return rows
+
+
+def _model_states(python: str, names: list[str], backend_source_root: Path | None,
+                  runner: CommandRunner) -> dict[str, dict[str, object]]:
+    if not python or not names:
+        return {}
+    env = dict(os.environ)
+    if backend_source_root:
+        existing = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = str(backend_source_root) + (os.pathsep + existing if existing else "")
+    try:
+        # Checking a model reads the whole file once, so a large one takes a while on a slow disk.
+        result = runner([python, "-c", _MODEL_PROBE, *names], 600, env)
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    if result.returncode != 0:
+        return {}
+    line = next((item.strip() for item in reversed(result.stdout.splitlines())
+                 if item.strip().startswith("{") and item.strip().endswith("}")), "")
+    try:
+        payload = json.loads(line) if line else {}
+    except ValueError:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return {str(name): value for name, value in payload.items() if isinstance(value, dict) and value.get("state")}
+
+
+def _model_row(key: str, model: str, purpose: str, state: dict[str, object], *, checked_at: str) -> DependencyStatus:
+    found = str(state.get("state") or "")
+    path = str(state.get("path") or "")
+    estimate = MODEL_DOWNLOAD_ESTIMATES.get(model, "an unknown download size")
+    approve = {"action_label": "Approve download", "action_kind": "approve_model_download"}
+    if found == "valid":
+        status, detail, actions = "ready", (
+            "Already on this PC and matches the file Whisper published, so it is used as it is, with no download."), {}
+    elif found == "damaged":
+        status, detail, actions = "needs_setup", (
+            "The copy on this PC does not match the file Whisper published, so it is not used, and it is never "
+            f"replaced without your approval. Approve its download ({estimate}) to replace it."), approve
+    elif found == "missing":
+        status, detail, actions = "needs_setup", (
+            f"Not on this PC yet. Approve its download ({estimate}) to use it; nothing downloads without your "
+            "approval."), approve
+    elif found == "unknown":
+        status, detail, actions = "needs_setup", (
+            "This Whisper does not know a model by that name. Choose another Whisper model in Settings."), {
+            "action_label": "Install guide", "action_kind": "install_guide"}
+    else:
+        status, detail, actions = "needs_setup", (
+            "Not checked: the Python that runs Whisper could not check its models. Fix the rows above, then "
+            "Refresh readiness."), {}
+    return _dependency(
+        key,
+        f"Whisper model: {model}",
+        purpose,
+        status,
+        path=path,
+        detail=detail,
+        required=False,
+        checked_at=checked_at,
+        found_by=FOUND_ON_PC if found == "valid" else "",
+        model=model,
+        **actions,
+    )
 
 
 def _probe_python_candidate(
@@ -322,6 +443,61 @@ def _candidate_score(payload: dict[str, object]) -> int:
     return score
 
 
+# Installer plan, Stage 1 (decision D7): the only two reasons a Python already on the PC is used instead of ours.
+KEPT_FOR_GRAPHICS_CARD = "Kept your Python because it can use your graphics card."
+KEPT_FOR_ARGOS = "Kept your Python because it has Argos Translate."
+
+
+def _same_file(first: str, second: str) -> bool:
+    if not first or not second:
+        return False
+    return os.path.normcase(os.path.abspath(first)) == os.path.normcase(os.path.abspath(second))
+
+
+def select_python(
+    candidate_results: list[tuple[str, dict[str, object]]],
+    private_python: str = "",
+    *,
+    translation_needs_argos: bool = False,
+) -> tuple[str, dict[str, object], str]:
+    """The Python the Workbench uses, with the note its row shows: (path, probe, note).
+
+    Our private Python, when it is there and starts with the helper, unless one of the two kept exceptions
+    applies to a Python already on the PC:
+    1. it imports Whisper, the helper and PyTorch with working CUDA, while ours has no graphics-card support;
+    2. translation runs locally (Local or Hybrid), ours lacks Argos Translate, and it has Argos with Whisper
+       and the helper.
+    Without our private Python (a run from the source, or a damaged copy) the healthiest Python found is used,
+    as before. A chosen Python never reaches here: it is the only candidate.
+    """
+
+    if not candidate_results:
+        return "", {}, ""
+    ours = next(((path, probe) for path, probe in candidate_results if _same_file(path, private_python)), None)
+    if ours is not None and ours[1].get("python_version") and ours[1].get("helper_import_ok"):
+        others = [(path, probe) for path, probe in candidate_results if not _same_file(path, private_python)]
+        if not ours[1].get("cuda_available"):
+            for path, probe in others:
+                if (probe.get("whisper_import_ok") and probe.get("helper_import_ok") and probe.get("torch_import_ok")
+                        and probe.get("cuda_available")):
+                    return path, probe, KEPT_FOR_GRAPHICS_CARD
+        if translation_needs_argos and not ours[1].get("argos_available"):
+            for path, probe in others:
+                if probe.get("argos_available") and probe.get("whisper_import_ok") and probe.get("helper_import_ok"):
+                    return path, probe, KEPT_FOR_ARGOS
+        return ours[0], ours[1], ""
+    path, probe = max(candidate_results, key=lambda item: _candidate_score(item[1]))
+    return path, probe, ""
+
+
+def translation_needs_argos(settings: dict[str, object]) -> bool:
+    """Whether translation runs locally with Argos: a target language is set and the mode is Local or Hybrid."""
+
+    targets = str(settings.get("translate_to") or "").strip()
+    mode = str(settings.get("processing_mode") or "Local").strip().casefold()
+    return bool(targets) and mode in {"local", "hybrid"}
+
+
 def _tool_version(
     executable: str,
     args: list[str],
@@ -351,6 +527,8 @@ def _dependency(
     action_label: str = "",
     action_kind: str = "",
     checked_at: str = "",
+    found_by: str = "",
+    model: str = "",
 ) -> DependencyStatus:
     return DependencyStatus(
         name=name,
@@ -364,6 +542,8 @@ def _dependency(
         action_label=action_label,
         action_kind=action_kind,
         last_checked=checked_at,
+        found_by=found_by,
+        model=model,
     )
 
 
@@ -380,10 +560,17 @@ def run_dependency_preflight(
     checked_at: str | None = None,
     configured_vlc: str = "",
     vlc_finder: Callable[[str], str] = find_vlc,
+    translation_needs_argos: bool = False,
+    quick_model: str = "",
 ) -> DependencyPreflightResult:
     """Check the runtime path without opening or processing any source media."""
 
     timestamp = checked_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    bundled_dir = str(getattr(resources, "bundled_dir", "") or "")
+    private_python = bundled_tool("python", bundled_dir) if bundled_dir else ""
+
+    def where(path: str, chosen: str = "") -> str:
+        return found_by_text(path, chosen=chosen, bundled_dir=bundled_dir or None)
     dependencies: list[DependencyStatus] = []
     sidecar_ready = bool(
         resources.script_path
@@ -445,6 +632,7 @@ def run_dependency_preflight(
             action_label="Choose path" if ytdlp_status == "needs_setup" else "Update guide" if ytdlp_status == "update_recommended" else "",
             action_kind="choose_ytdlp" if ytdlp_status == "needs_setup" else "install_guide" if ytdlp_status == "update_recommended" else "",
             checked_at=timestamp,
+            found_by=where(ytdlp, configured_ytdlp) if ytdlp_ok else "",
         )
     )
 
@@ -463,6 +651,7 @@ def run_dependency_preflight(
             action_label="Install guide" if not powershell_ok else "",
             action_kind="install_guide" if not powershell_ok else "",
             checked_at=timestamp,
+            found_by=where(resources.powershell_exe) if powershell_ok else "",
         )
     )
 
@@ -473,6 +662,9 @@ def run_dependency_preflight(
             configured_python=configured_python,
             runner=runner,
         )
+    if private_python and not configured_python and Path(private_python).is_file():
+        # Installer plan, Stage 1: our own Python is always one of the candidates, and is looked at first.
+        candidates = [private_python, *candidates]
     candidates = _unique_existing(candidates)
     candidate_results: list[tuple[str, dict[str, object]]] = []
     alias_candidates = [item for item in candidates if _is_windows_store_alias(item)]
@@ -493,17 +685,19 @@ def run_dependency_preflight(
             )
         except (OSError, ValueError, json.JSONDecodeError, subprocess.SubprocessError):
             continue
-    selected_path = ""
-    selected_probe: dict[str, object] = {}
-    if candidate_results:
-        selected_path, selected_probe = max(
-            candidate_results,
-            key=lambda item: _candidate_score(item[1]),
-        )
+    selected_path, selected_probe, kept_note = select_python(
+        candidate_results, private_python, translation_needs_argos=translation_needs_argos
+    )
+    uses_ours = bool(selected_path) and _same_file(selected_path, private_python)
+    if selected_path and not uses_ours:
         selected_path = str(selected_probe.get("python_path") or selected_path)
     python_ready = bool(selected_path and selected_probe.get("python_version"))
     python_detail = (
-        f"Validated {len(candidate_results)} usable Python installation(s); selected the healthiest runtime."
+        kept_note
+        if python_ready and kept_note
+        else "Media Manglers' own Python started successfully."
+        if python_ready and uses_ours
+        else f"Validated {len(candidate_results)} usable Python installation(s); selected the healthiest runtime."
         if python_ready and len(candidates) > 1
         else "The selected Python interpreter started successfully."
         if python_ready
@@ -511,6 +705,7 @@ def run_dependency_preflight(
         if alias_candidates and not candidate_results
         else "No usable Python interpreter was found."
     )
+    python_found_by = where(selected_path, configured_python) if python_ready else ""
     dependencies.append(
         _dependency(
             "python",
@@ -523,6 +718,7 @@ def run_dependency_preflight(
             action_label="Choose path" if not python_ready else "Choose path",
             action_kind="choose_python",
             checked_at=timestamp,
+            found_by=python_found_by,
         )
     )
 
@@ -559,6 +755,7 @@ def run_dependency_preflight(
             action_label="Choose path",
             action_kind="choose_ffmpeg",
             checked_at=timestamp,
+            found_by=where(ffmpeg, configured_ffmpeg) if ffmpeg_ok else "",
         )
     )
     ffprobe, ffprobe_note = _chosen_or_found(configured_ffprobe, resources.ffprobe_exe)
@@ -575,6 +772,7 @@ def run_dependency_preflight(
             action_label="Choose path",
             action_kind="choose_ffprobe",
             checked_at=timestamp,
+            found_by=where(ffprobe, configured_ffprobe) if ffprobe_ok else "",
         )
     )
 
@@ -596,32 +794,27 @@ def run_dependency_preflight(
             action_label="Install guide" if not whisper_ready else "",
             action_kind="install_guide" if not whisper_ready else "",
             checked_at=timestamp,
+            found_by=(FOUND_BUNDLED if uses_ours else FOUND_ON_PC) if whisper_ready else "",
         )
     )
-    model_cached = bool(selected_probe.get("model_cached"))
-    model_known = bool(selected_probe.get("model_known"))
-    estimate = MODEL_DOWNLOAD_ESTIMATES.get(selected_model, "an unknown download size")
-    model_detail = (
-        "The selected model is already present in the standard Whisper cache."
-        if model_cached
-        else f"The selected model is not cached. First use may download {estimate}; approval is required before launch."
-        if model_known
-        else "The selected model name was not recognized by this Whisper installation."
-    )
-    dependencies.append(
-        _dependency(
-            "whisper_model",
-            f"Whisper model: {selected_model}",
-            "Controls transcription accuracy, runtime, and local model storage.",
-            "ready" if model_cached else "needs_setup",
-            path=str(selected_probe.get("model_cache_path") or ""),
-            detail=model_detail,
-            required=False,
-            action_label="Approve download" if model_known and not model_cached else "Install guide" if not model_cached else "",
-            action_kind="approve_model_download" if model_known and not model_cached else "install_guide" if not model_cached else "",
-            checked_at=timestamp,
-        )
-    )
+    # Installer plan, Stage 3: one row per model a workflow will load, each checked against the file Whisper
+    # published, in the Python that runs Whisper (ours, or one of yours kept under an exception). A valid model
+    # already in the cache is reused; a missing or damaged one offers Approve download, and nothing downloads
+    # until you approve it.
+    models = required_models(selected_model, quick_model)
+    states = (_model_states(selected_path, [model for _key, model, _purpose in models], resources.backend_source_root,
+                            runner)
+              if selected_path and selected_probe.get("helper_import_ok") else {})
+    for key, model, purpose in models:
+        state = states.get(model) or {}
+        if not state and model == selected_model and selected_probe.get("model_known") is not None:
+            # The checksum probe did not answer: the main probe's own look at the cache is the best there is.
+            if not selected_probe.get("model_known"):
+                state = {"state": "unknown"}
+            else:
+                state = {"state": "valid" if selected_probe.get("model_cached") else "missing",
+                         "path": selected_probe.get("model_cache_path") or ""}
+        dependencies.append(_model_row(key, model, purpose, state, checked_at=timestamp))
 
     torch_ready = bool(selected_probe.get("torch_import_ok"))
     dependencies.append(
@@ -637,6 +830,11 @@ def run_dependency_preflight(
             action_label="Install guide" if not torch_ready else "",
             action_kind="install_guide" if not torch_ready else "",
             checked_at=timestamp,
+            found_by=(
+                found_by_text(str(selected_probe.get("torch_path") or ""), bundled_dir=bundled_dir or None,
+                              downloaded_dir=addons_root())
+                if uses_ours else FOUND_ON_PC
+            ) if torch_ready else "",
         )
     )
     cuda_ready = bool(selected_probe.get("cuda_available"))

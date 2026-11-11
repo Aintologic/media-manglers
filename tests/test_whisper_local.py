@@ -11,6 +11,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from media_manglers.providers import whisper_local
+from tests.whisper_test_models import checked_whisper  # noqa: E402
 
 
 class _FakeCuda:
@@ -88,7 +89,7 @@ class WhisperLocalProviderTests(unittest.TestCase):
         with mock.patch.dict(
             sys.modules,
             {
-                "whisper": _FakeWhisperModule(),
+                "whisper": checked_whisper(_FakeWhisperModule()),
                 "torch": _FakeTorchModule(),
             },
             clear=False,
@@ -112,7 +113,7 @@ class WhisperLocalProviderTests(unittest.TestCase):
         with mock.patch.dict(
             sys.modules,
             {
-                "whisper": _FakeWhisperModule(),
+                "whisper": checked_whisper(_FakeWhisperModule()),
                 "torch": _FakeCpuTorchModule(),
             },
             clear=False,
@@ -151,7 +152,7 @@ class WhisperLocalProviderTests(unittest.TestCase):
             with mock.patch.dict(
                 sys.modules,
                 {
-                    "whisper": _FakeWhisperModule(),
+                    "whisper": checked_whisper(_FakeWhisperModule()),
                     "torch": _FakeTorchModule(),
                 },
                 clear=False,
@@ -202,7 +203,7 @@ class WhisperLocalProviderTests(unittest.TestCase):
             with mock.patch.dict(
                 sys.modules,
                 {
-                    "whisper": _FakeWhisperModule(),
+                    "whisper": checked_whisper(_FakeWhisperModule()),
                     "torch": _FakeCpuTorchModule(),
                 },
                 clear=False,
@@ -295,7 +296,7 @@ class RescuedSegmentAuditTests(unittest.TestCase):
         }
         with mock.patch.dict(
             sys.modules,
-            {"whisper": _ScriptedSparseWhisper(), "torch": _FakeCpuTorchModule()},
+            {"whisper": checked_whisper(_ScriptedSparseWhisper()), "torch": _FakeCpuTorchModule()},
             clear=False,
         ):
             whisper_local.transcribe_from_request(payload)
@@ -356,7 +357,7 @@ class RescuedSegmentAuditTests(unittest.TestCase):
             }
             with mock.patch.dict(
                 sys.modules,
-                {"whisper": _FakeWhisperModule(), "torch": _FakeCpuTorchModule()},
+                {"whisper": checked_whisper(_FakeWhisperModule()), "torch": _FakeCpuTorchModule()},
                 clear=False,
             ):
                 whisper_local.transcribe_from_request(payload)
@@ -419,7 +420,7 @@ class InventedLineFilterTests(unittest.TestCase):
         ]
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            with mock.patch.dict(sys.modules, {"whisper": _ScriptedContinuousWhisper(), "torch": _FakeCpuTorchModule()},
+            with mock.patch.dict(sys.modules, {"whisper": checked_whisper(_ScriptedContinuousWhisper()), "torch": _FakeCpuTorchModule()},
                                  clear=False):
                 whisper_local.transcribe_from_request(self._payload(root, "Continuous"))
             delivered, audit = self._read(root, "transcript.json"), self._read(root, "transcript.raw.json")
@@ -436,7 +437,7 @@ class InventedLineFilterTests(unittest.TestCase):
         _ScriptedSparseModel.script = [[_REAL_NARRATION, dict(line)], [dict(line)]]
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            with mock.patch.dict(sys.modules, {"whisper": _ScriptedSparseWhisper(), "torch": _FakeCpuTorchModule()},
+            with mock.patch.dict(sys.modules, {"whisper": checked_whisper(_ScriptedSparseWhisper()), "torch": _FakeCpuTorchModule()},
                                  clear=False):
                 whisper_local.transcribe_from_request(self._payload(root, "Sparse"))
             delivered, audit = self._read(root, "transcript.json"), self._read(root, "transcript.raw.json")
@@ -466,7 +467,7 @@ class WordsToSpellRightCorrectTheTranscriptTests(unittest.TestCase):
         payload = {"audio_path": str(audio_path), "output_dir": str(root / "output"), "model_name": "medium",
                    "language_code": "en", "prefer_gpu": False, "task_name": "transcribe",
                    "heartbeat_interval_seconds": 15, **extra}
-        with mock.patch.dict(sys.modules, {"whisper": _ScriptedContinuousWhisper(), "torch": _FakeCpuTorchModule()},
+        with mock.patch.dict(sys.modules, {"whisper": checked_whisper(_ScriptedContinuousWhisper()), "torch": _FakeCpuTorchModule()},
                              clear=False):
             whisper_local.transcribe_from_request(payload)
         read = lambda name: json.loads((root / "output" / name).read_text(encoding="utf-8"))  # noqa: E731
@@ -540,7 +541,7 @@ class WordsSurviveTheRetryTests(unittest.TestCase):
             "initial_prompt": self.WORDS,
             "heartbeat_interval_seconds": 15,
         }
-        with mock.patch.dict(sys.modules, {"whisper": _PromptRecordingSparseWhisper(), "torch": _FakeCpuTorchModule()},
+        with mock.patch.dict(sys.modules, {"whisper": checked_whisper(_PromptRecordingSparseWhisper()), "torch": _FakeCpuTorchModule()},
                              clear=False):
             whisper_local.transcribe_from_request(payload)
         read = lambda name: json.loads((root / "output" / name).read_text(encoding="utf-8"))  # noqa: E731

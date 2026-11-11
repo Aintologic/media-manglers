@@ -16,6 +16,7 @@ import re
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 from typing import Any, Callable
 
@@ -65,7 +66,7 @@ from media_manglers.core import (
     review_inbox,
     review_orchestration,
 )
-from media_manglers.core import app_cache, inbox_move, inbox_records, recording_records, safe_write, speech_facts
+from media_manglers.core import app_cache, app_locks, inbox_move, inbox_records, recording_records, safe_write, speech_facts
 from .track_roles import SETTING_KEY as TRACK_ROLES_SETTING_KEY
 from media_manglers.core.recording_records import Records, import_legacy_settings
 from media_manglers.core.user_folders import recordings_drive_problem, set_recordings_folders, temporary_folder_problem
@@ -85,7 +86,7 @@ from .audio_detection import (
 from .ai_video_editor import HOME_CARD_KEY as AI_VIDEO_EDITOR_HOME_CARD
 from .ai_video_editor import NAV_LABEL as AI_VIDEO_EDITOR_NAV_LABEL
 from .ai_video_editor import PAGE_NAME as AI_VIDEO_EDITOR_PAGE
-from .ai_video_editor import AiVideoEditorPage, AiVideoEditorSettingsPanel, home_card_frame
+from .ai_video_editor import AiVideoEditorPage, AiVideoEditorSettingsPanel, cli_command, home_card_frame
 from .run_status import CANCELLED as RUN_CANCELLED, FAILED as RUN_FAILED, counts_as_warning, \
     decide as decide_run_status, never_ran as run_never_ran, stage_text as run_stage_text
 from .raw_bin_page import HOME_CARD_KEY as RAW_BIN_HOME_CARD
@@ -101,11 +102,16 @@ from .bug_reports import BugReportsPage
 from .build_identity import resolve_build_identity
 from .command_builder import CommandSpec, build_workflow_command, validate_effective_command
 from .dependencies import (
+    VOICE_MODEL,
     DependencyCheckStopped,
     DependencyPreflightResult,
     StoppableRunner,
+    _end_process_tree,
     run_dependency_preflight,
+    translation_needs_argos,
 )
+from media_manglers.contracts import write_json_file
+from media_manglers.core.race_video.requests import quick_model as editor_quick_model
 from .estimates import estimate_sampling
 from .evidence import EvidenceCandidate, EvidencePackage, SessionMention, load_evidence_package
 from .metadata import (
@@ -187,7 +193,7 @@ from .ui_parts import (
     warn,
     work_done_text,
 )
-from .tool_sources import needs_download, tool_source
+from .tool_sources import bundled_tool, needs_download, tool_source
 from .video_open import (
     PlaySequence,
     PlayTarget,
@@ -400,6 +406,7 @@ TRANSIENT_PROFILE_KEYS = {
     "dependency_ffmpeg_path",
     "dependency_ffprobe_path",
     "dependency_ytdlp_path",
+    "bundled_tools_question_answered",
     "whisper_model_download_approved",
     "evidence_audio_stream_index",
     "evidence_audio_stream_selection_confirmed",
@@ -786,8 +793,11 @@ class DependencyCheckThread(QThread):
         configured_ffprobe: str,
         configured_ytdlp: str,
         configured_vlc: str = "",
+        translation_needs_argos: bool = False,
+        quick_model: str = "",
     ) -> None:
         super().__init__()
+        self.quick_model = quick_model
         self.resources = resources
         self.selected_model = selected_model
         self.configured_python = configured_python
@@ -795,6 +805,7 @@ class DependencyCheckThread(QThread):
         self.configured_ffprobe = configured_ffprobe
         self.configured_ytdlp = configured_ytdlp
         self.configured_vlc = configured_vlc
+        self.translation_needs_argos = translation_needs_argos
         self._runner = StoppableRunner()
 
     @property
@@ -816,6 +827,8 @@ class DependencyCheckThread(QThread):
                 configured_ytdlp=self.configured_ytdlp,
                 configured_vlc=self.configured_vlc,
                 runner=self._runner,
+                translation_needs_argos=self.translation_needs_argos,
+                quick_model=self.quick_model,
             )
         except DependencyCheckStopped:
             return
@@ -825,6 +838,78 @@ class DependencyCheckThread(QThread):
             return
         if not self.stopped:
             self.check_ready.emit(result)
+
+
+class ModelDownloadThread(QThread):
+    """Installer plan, Stage 3: the Whisper model download the operator approved, and nothing else.
+
+    It runs the helper's ``whisper-model-download`` in the Python that runs Whisper (ours, or one of yours kept
+    under an exception), which writes each model to a partial file, checks it against the SHA-256 Whisper
+    published and only then puts it in place. Progress comes from a small file the helper keeps up to date.
+    Stopping (the Workbench closing) ends the helper; the partial file it leaves is removed at the next try."""
+
+    progress_changed = Signal(str)
+    download_finished = Signal(bool, str)
+
+    def __init__(self, argv: list[str], request: Path, result: Path, progress: Path, models: list[str]) -> None:
+        super().__init__()
+        self.argv = list(argv)
+        self.request, self.result, self.progress = request, result, progress
+        self.models = list(models)
+        self._stopped = threading.Event()
+        self._process: subprocess.Popen[bytes] | None = None
+
+    @property
+    def stopped(self) -> bool:
+        return self._stopped.is_set()
+
+    def cancel(self) -> None:
+        self._stopped.set()
+        process = self._process
+        if process is not None:
+            _end_process_tree(process)  # type: ignore[arg-type]
+
+    def _progress_text(self) -> str:
+        try:
+            data = json.loads(self.progress.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return ""
+        done, total = int(data.get("done") or 0), int(data.get("total") or 0)
+        name = str(data.get("model") or "")
+        amount = f"{done / 1_000_000:,.0f} MB of {total / 1_000_000:,.0f} MB" if total else f"{done / 1_000_000:,.0f} MB"
+        return f"{name}: {amount}" + (f" ({100 * done // total}%)" if total else "")
+
+    def run(self) -> None:
+        try:
+            self.request.parent.mkdir(parents=True, exist_ok=True)
+            write_json_file(self.request, {"payload": {"models": self.models, "progress_file": str(self.progress)}})
+            self._process = subprocess.Popen(self.argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                             stderr=subprocess.DEVNULL,
+                                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except OSError as exc:
+            self.download_finished.emit(False, f"The download could not start: {exc}")
+            return
+        shown = ""
+        while self._process.poll() is None:
+            if self.stopped:
+                _end_process_tree(self._process)  # type: ignore[arg-type]
+                return
+            text = self._progress_text()
+            if text and text != shown:
+                shown = text
+                self.progress_changed.emit(text)
+            time.sleep(0.25)
+        if self.stopped:
+            return
+        try:
+            outcome = json.loads(self.result.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            outcome = {"ok": False, "error": "The download ended without saying how it went."}
+        if outcome.get("ok"):
+            names = ", ".join(str(item.get("name")) for item in (outcome.get("data") or {}).get("models") or [])
+            self.download_finished.emit(True, f"Downloaded and checked: {names or ', '.join(self.models)}.")
+        else:
+            self.download_finished.emit(False, str(outcome.get("error") or "The download did not finish."))
 
 
 class AdvancedSettingsDialog(QDialog):
@@ -1114,6 +1199,8 @@ class WorkbenchWindow(QMainWindow):
             else WORKFLOW_CODEX_EVIDENCE
         )
         self.dependency_check_thread: DependencyCheckThread | None = None
+        # Installer plan, Stage 3: the Whisper model download the operator approved, while it runs.
+        self.model_download_thread: ModelDownloadThread | None = None
         self.run_started_monotonic = 0.0
         self.review_inbox_diagnostics: list[str] = []
         self.run_log_lines: list[str] = []
@@ -4926,19 +5013,13 @@ class WorkbenchWindow(QMainWindow):
                 errors.append(
                     "Neither CUDA nor CPU fallback is ready for Local Whisper. Repair the selected Python runtime."
                 )
-            if (
-                model is not None
-                and not model.ready
-                and not self.run_settings.get("whisper_model_download_approved")
-            ):
-                if model.status == "not_checked":
-                    errors.append(
-                        "The selected Whisper model has not been checked. Refresh readiness in Settings > Dependencies."
-                    )
-                else:
-                    errors.append(
-                        "The selected Whisper model is not cached. Approve its explained download in Settings > Dependencies before starting."
-                    )
+            # Installer plan, Stage 3: the selected model and base.en (voice detection) must be on this PC as Whisper
+            # published them; only the approval in Settings > Dependencies downloads one.
+            if model is not None and model.status == "not_checked":
+                errors.append(
+                    "The selected Whisper model has not been checked. Refresh readiness in Settings > Dependencies."
+                )
+            errors.extend(self.model_blockers([str(self.run_settings.get("whisper_model") or ""), VOICE_MODEL]))
         if kind == "url" and self.current_workflow == WORKFLOW_FULL_REVIEW and self.resources.preflight_complete:
             ytdlp = self._dependency_by_key("ytdlp")
             if ytdlp is None or not ytdlp.ready:
@@ -5642,6 +5723,12 @@ class WorkbenchWindow(QMainWindow):
         if self.runner_thread is not None:
             self.report_run_in_progress()
             return False
+        if kind == "bug_reports":
+            # Installer plan, Stage 3: Find my bug reports checks its Whisper models like the main Start does.
+            blockers = self.model_blockers([str(settings.get("whisper_model") or ""), VOICE_MODEL])
+            if blockers:
+                warn(self, "The Whisper model is not ready", "\n\n".join(blockers))
+                return False
         count = len(queue_items)
         self.external_run = {
             "title": title,
@@ -9043,14 +9130,18 @@ class WorkbenchWindow(QMainWindow):
         self.dependency_check_banner.show_job(JobInfo(
             token="readiness-check", title="Checking the tools the Workbench uses", state="active",
             detail="Python, FFmpeg, Whisper and the rest; nothing is installed or changed"))
+        selected_model = str(self.run_settings.get("whisper_model") or "base.en")
         thread = DependencyCheckThread(
             self.resources,
-            str(self.run_settings.get("whisper_model") or "base.en"),
+            selected_model,
             str(self.app_settings.get("dependency_python_path") or ""),
             str(self.app_settings.get("dependency_ffmpeg_path") or ""),
             str(self.app_settings.get("dependency_ffprobe_path") or ""),
             str(self.app_settings.get("dependency_ytdlp_path") or ""),
             str(self.app_settings.get("video_player_vlc_path") or ""),
+            translation_needs_argos=translation_needs_argos(self.run_settings),
+            # Installer plan, Stage 3: the AI Video Editor's quick-pass model gets its own row.
+            quick_model=editor_quick_model(self.app_settings, {"model_name": selected_model}),
         )
         thread.check_ready.connect(self._dependency_check_ready)
         thread.check_failed.connect(self._dependency_check_failed)
@@ -9077,6 +9168,65 @@ class WorkbenchWindow(QMainWindow):
         self.refresh_dependency_status()
         self.refresh_review_summary()
         self.missing_tools_notice.show_once(self.resources.dependencies)
+        self.ask_about_saved_tool_paths()
+
+    # Installer plan, Stage 1: a path an earlier version saved may be one that version found on this PC, not one
+    # the operator chose. Once, when such a path differs from the copy bundled with Media Manglers, the operator
+    # is asked which to use; nothing changes silently, and "Keep my paths" is the default.
+    SAVED_TOOL_PATHS = (
+        ("ffmpeg", "dependency_ffmpeg_path"),
+        ("ffprobe", "dependency_ffprobe_path"),
+        ("python", "dependency_python_path"),
+    )
+
+    def saved_paths_differing_from_bundled(self) -> list[tuple[str, str]]:
+        """(setting, saved path) for each saved tool path that differs from a copy bundled with Media Manglers."""
+
+        bundled_dir = str(getattr(self.resources, "bundled_dir", "") or "")
+        if not bundled_dir or self.app_settings.get("bundled_tools_question_answered"):
+            return []
+        differing: list[tuple[str, str]] = []
+        for key, setting in self.SAVED_TOOL_PATHS:
+            saved = str(self.app_settings.get(setting) or "").strip().strip('"')
+            ours = bundled_tool(key, bundled_dir)
+            if (saved and ours and Path(ours).is_file()
+                    and os.path.normcase(os.path.abspath(saved)) != os.path.normcase(os.path.abspath(ours))):
+                differing.append((setting, saved))
+        return differing
+
+    def _choose_bundled_tools(self, saved: list[str]) -> bool:
+        """The question itself: True for the bundled copies, False to keep the saved paths."""
+
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle("Use the tools bundled with Media Manglers?")
+        box.setText(
+            "Media Manglers now comes with its own FFmpeg and Python. Your settings still point to these, saved "
+            "by an earlier version:\n\n" + "\n".join(saved)
+            + "\n\nUse the copies bundled with Media Manglers, or keep your paths? You are asked only once; "
+            "Settings > Dependencies > Choose path changes it later.")
+        use = box.addButton("Use the bundled copies", QMessageBox.ButtonRole.AcceptRole)
+        keep = box.addButton("Keep my paths", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(keep)
+        box.setEscapeButton(keep)
+        box.exec()
+        return box.clickedButton() is use
+
+    def ask_about_saved_tool_paths(self) -> None:
+        differing = self.saved_paths_differing_from_bundled()
+        if not differing:
+            return
+        use_bundled = self._choose_bundled_tools([saved for _setting, saved in differing])
+        self.app_settings["bundled_tools_question_answered"] = True
+        if use_bundled:
+            for setting, _saved in differing:
+                self.app_settings[setting] = ""
+        self.save_app_settings()
+        self._write_workbench_log(
+            "Saved tool paths replaced by the bundled copies." if use_bundled else "Saved tool paths kept.")
+        if use_bundled:
+            self.resources = discover_runtime_resources(self.app_settings)
+            QTimer.singleShot(0, self.start_dependency_check)
 
     def _dependency_check_failed(self, _details: str) -> None:
         self.resources.dependencies = [
@@ -9141,8 +9291,10 @@ class WorkbenchWindow(QMainWindow):
             self.dependency_details.clear()
             self._show_tool_source(None)
             return
+        found = f"<p><b>Found:</b> {escape(dependency.found_by)}</p>" if dependency.found_by else ""
         self.dependency_details.setHtml(
             f"<p><b>State:</b> {escape(dependency.display_status)}</p>"
+            f"{found}"
             f"<p><b>Detected version:</b> {escape(dependency.version or 'Not available')}</p>"
             f"<p><b>Detected path:</b> {escape(dependency.path or 'Not available')}</p>"
             f"<p><b>Last checked:</b> {escape(dependency.last_checked or 'Not checked yet')}</p>"
@@ -9247,34 +9399,20 @@ class WorkbenchWindow(QMainWindow):
                 self.start_dependency_check()
             return
         if dependency.action_kind == "approve_model_download":
+            # Installer plan, Stage 3: the approval is the only way a Whisper model downloads, in every feature.
+            model = dependency.model or str(self.run_settings.get("whisper_model") or "")
             response = QMessageBox.question(
                 self,
                 "Approve model download?",
                 dependency.detail
-                + "\n\nAllow the Workbench to download this model when the next review starts? "
-                "This changes only the local Whisper model cache and can use substantial disk space.",
+                + f"\n\nDownload the Whisper model {model} now? It is saved in the Whisper model cache on this PC, "
+                "checked against the file Whisper published, and can use substantial disk space. Nothing else is "
+                "changed.",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
             if response == QMessageBox.StandardButton.Yes:
-                self.run_settings["whisper_model_download_approved"] = True
-                self.resources.dependencies = [
-                    replace(
-                        item,
-                        detail=item.detail
-                        + " Download approved for the next review; nothing has been downloaded yet.",
-                        action_label="",
-                        action_kind="",
-                    )
-                    if item.key == "whisper_model"
-                    else item
-                    for item in self.resources.dependencies
-                ]
-                self.refresh_dependency_status()
-                self.dependency_summary.setText(
-                    "Model download approved for the next review. The Workbench has not downloaded anything yet."
-                )
-                self.refresh_review_summary()
+                self.start_model_download([model])
             return
         guidance = {
             "repair_app": (
@@ -9773,6 +9911,15 @@ class WorkbenchWindow(QMainWindow):
         # refuse the close and leave the window open with the check stopped.
         if self.dependency_check_thread is not None:
             self._stop_dependency_check_for_close()
+        # Installer plan, Stage 3: an approved model download stops with the window, like the readiness check;
+        # its partial file never looks like a model and is removed at the next try.
+        if self.model_download_thread is not None:
+            download = self.model_download_thread
+            download.cancel()
+            if not download.wait(3000):
+                _STILL_STOPPING.add(download)
+                download.finished.connect(functools.partial(_STILL_STOPPING.discard, download))
+            self._write_workbench_log("Whisper model download stopped because the Workbench closed.")
         # 135: a waveform build stops at once, keeping what it measured; it never holds the close up.
         self.levels_service.shutdown()
         # 220: the library's connection is closed so its write-ahead log is folded in.
@@ -9787,6 +9934,70 @@ class WorkbenchWindow(QMainWindow):
             self.records = None
         self._write_workbench_log("Workbench closed.")
         event.accept()
+
+    def start_model_download(self, models: list[str]) -> bool:
+        """Download the Whisper models the operator just approved, as a job with its banner on Settings >
+        Dependencies; readiness is checked again when it ends (installer plan, Stage 3)."""
+
+        models = [name for name in dict.fromkeys(str(item or "").strip() for item in models) if name]
+        if not models or self.model_download_thread is not None:
+            return False
+        if not self.resources.python_exe or self.resources.backend_source_root is None:
+            self.dependency_summary.setText(
+                "The model cannot be downloaded until the Python that runs Whisper is ready. Fix the Python rows, "
+                "then Refresh readiness.")
+            return False
+        work = Path(str(self.app_settings.get("temp_folder") or default_temp_folder())) / (
+            f"model-download-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
+        request, result = work / "request.json", work / "result.json"
+        argv = cli_command(self.resources, "whisper-model-download", request, result).argv
+        thread = ModelDownloadThread(argv, request, result, work / "progress.json", models)
+        names = ", ".join(models)
+        thread.progress_changed.connect(lambda text: self.dependency_check_banner.show_job(JobInfo(
+            token="model-download", title=f"Downloading the Whisper model {names}", state="active", detail=text)))
+        thread.download_finished.connect(lambda ok, message, folder=work: self._model_download_finished(
+            ok, message, folder))
+        thread.finished.connect(lambda worker=thread: self._model_download_stopped(worker))
+        self.model_download_thread = thread
+        self.dependency_check_banner.show_job(JobInfo(
+            token="model-download", title=f"Downloading the Whisper model {names}", state="active",
+            detail="Approved by you; checked against the file Whisper published before it is used"))
+        self.dependency_summary.setText(f"Downloading the Whisper model {names}. You can keep working meanwhile.")
+        self._write_workbench_log(f"Whisper model download approved and started: {names}.")
+        thread.start()
+        return True
+
+    def _model_download_finished(self, ok: bool, message: str, work: Path) -> None:
+        self.dependency_check_banner.show_job(JobInfo(
+            token="model-download", title="Whisper model download", state="completed" if ok else "attention",
+            detail=message))
+        self.dependency_summary.setText(message)
+        self._write_workbench_log(f"Whisper model download {'finished' if ok else 'failed'}: {message}")
+        try:
+            safe_write.remove_disposable_tree(work, within=work.parent)
+        except OSError:
+            pass  # the Workbench's own temporary folder; clean-up removes it later
+        if ok:
+            QTimer.singleShot(0, self.start_dependency_check)
+
+    def _model_download_stopped(self, worker: ModelDownloadThread) -> None:
+        worker.deleteLater()
+        if self.model_download_thread is worker:
+            self.model_download_thread = None
+
+    def model_blockers(self, models: list[str]) -> list[str]:
+        """Installer plan, Stage 3: why each of ``models`` cannot be used yet, from its readiness row: missing or not
+        matching the file Whisper published. A model not checked yet blocks nothing here; its run's own check
+        refuses it in the same words."""
+
+        reasons: list[str] = []
+        for name in dict.fromkeys(str(item or "").strip() for item in models):
+            row = next((item for item in self.resources.dependencies
+                        if item.key.startswith("whisper_model") and item.model == name), None)
+            if row is None or row.ready or row.status in {"not_checked", "checking", "info"}:
+                continue
+            reasons.append(f"Whisper model {name}: {row.detail} Open Settings > Dependencies to approve it.")
+        return reasons
 
     def _stop_dependency_check_for_close(self) -> None:
         thread = self.dependency_check_thread
@@ -9849,11 +10060,30 @@ SMOKE_STACK_FILE = "smoke-launch-stacks.txt"
 SMOKE_STACK_AFTER_SECONDS = 15   # the build waits 30 seconds, so the stacks are written by then
 
 
+ALREADY_OPEN_TITLE = "Media Manglers is already open"
+ALREADY_OPEN_TEXT = (
+    "Media Manglers is already open in another window. Only one can run at a time, because both would use the "
+    "same library and settings. Switch to the window that is open.")
+ALREADY_OPEN_EXIT = 4
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     # 224 (Wave B2a): everything this Workbench starts (the host, the helpers, FFmpeg) inherits its process
     # number, so a file one of them holds counts as the app's own and is never waited for.
     safe_write.mark_app_process()
+    # Installer plan, Stage 2: one Workbench at a time for the same data, and every running Media Manglers holds
+    # the lock the installer looks for. A second Workbench says so and closes before it opens anything.
+    if not app_locks.take_workbench_lock():
+        if args.offscreen:
+            os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        if not args.smoke_test:
+            notice_app = QApplication.instance() or QApplication(qt_arguments(sys.argv[:1]))
+            QMessageBox.information(None, ALREADY_OPEN_TITLE, ALREADY_OPEN_TEXT)
+            del notice_app
+        print(ALREADY_OPEN_TEXT, file=sys.stderr, flush=True)
+        return ALREADY_OPEN_EXIT
+    app_locks.hold_running_lock()
     # 159: the build's smoke launch sometimes never ends, and the app's log stops at "Workbench
     # started." If this launch is still running after the limit, every thread's Python stack is
     # written beside the app's logs, so the build can show where it was waiting. It is armed first,

@@ -33,6 +33,7 @@ from typing import Any, Callable
 from . import app_cache, raw_bin_library, recording_records, safe_write, speech_facts, voice_track
 from .scratch import scratch_root
 from .user_folders import recordings_drive_problem
+from .whisper_models import ModelNotApproved
 
 # This job's own cache entries. The raw bin library keeps its levels under "levels", by content.
 LEVELS_KIND = "levels-file"
@@ -282,6 +283,12 @@ def _store_facts(source: Path, frames: _Frames, streams: list[dict[str, Any]], d
                 model_name=str(facts.get("model_name") or "base.en"), language_code=str(facts.get("language_code") or "en"))
         except voice_track.ListeningStopped:
             return "stopped"
+        except ModelNotApproved as exc:
+            # Installer plan, Stage 3: a background job never asks and never downloads. It skips the listening with a
+            # note, and a later try listens once the model is approved.
+            print(PROGRESS_PREFIX + json.dumps({"listening_skipped": "model_not_approved", "model": exc.model}),
+                  flush=True)
+            return "not_stored"
         except Exception as exc:  # noqa: BLE001 - listening only adds to what was measured; the player says why
             # The checkpoint stays, so a later try listens without reading the whole recording again.
             print(PROGRESS_PREFIX + json.dumps({"listening_failed": type(exc).__name__}), flush=True)

@@ -33,6 +33,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from media_manglers.core import cross_track_check, sparse_narration as sn  # noqa: E402
 from media_manglers.providers import whisper_local  # noqa: E402
+from tests.whisper_test_models import checked_whisper  # noqa: E402
 
 FFMPEG = shutil.which("ffmpeg")
 GIT = shutil.which("git")
@@ -113,7 +114,7 @@ def transcribe(module, wav: Path, output: Path, script: dict[int, list], **paylo
     request = {"audio_path": str(wav), "output_dir": str(output), "model_name": "medium", "language_code": "en",
                "prefer_gpu": False, "task_name": "transcribe", "narration_speech_mode": "Sparse",
                "heartbeat_interval_seconds": 60, **payload}
-    with mock.patch.dict(sys.modules, {"whisper": _ScriptedWhisper(), "torch": _CpuTorch()}, clear=False):
+    with mock.patch.dict(sys.modules, {"whisper": checked_whisper(_ScriptedWhisper()), "torch": _CpuTorch()}, clear=False):
         result = module.transcribe_from_request(request)
     files = {item.name: item.read_bytes() for item in sorted(output.iterdir()) if item.is_file()}
     return {"result": result, "files": files}

@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import sys
 
-from .tool_sources import find_tool
+from .tool_sources import bundled_tools_dir, find_tool, found_by_text
 
 
 RUNTIME_ROOT_OVERRIDE = "MEDIA_MANGLERS_WORKBENCH_ROOT"
@@ -26,6 +26,11 @@ class DependencyStatus:
     action_label: str = ""
     action_kind: str = ""
     last_checked: str = ""
+    # Where the tool came from, in plain words: "Bundled with Media Manglers", "Downloaded by Media
+    # Manglers", "Your chosen path", "Already on this PC" or "Part of Windows" (installer plan, Stage 1).
+    found_by: str = ""
+    # For a model row: the Whisper model it is about (Stage 3).
+    model: str = ""
 
     @property
     def ready(self) -> bool:
@@ -62,6 +67,8 @@ class RuntimeResources:
     preflight_complete: bool = False
     last_dependency_check: str = ""
     python_candidates: list[str] = field(default_factory=list)
+    # Media Manglers' own tools folder (``<app folder>\runtime``) when it holds any of them; "" otherwise.
+    bundled_dir: str = ""
 
     @property
     def backend_ready(self) -> bool:
@@ -119,19 +126,24 @@ def discover_runtime_resources(configured_paths: dict[str, object] | None = None
         roots,
         ("Video Mangler.ico", "assets/Video Mangler.ico", "resources/Video Mangler.ico"),
     )
-    # 188: the path the user chose, then PATH, then the tool's own install folders. A chosen
-    # Python is kept even when it is missing, so the check says so rather than using another one.
+    # 188 and installer plan Stage 1: the path the user chose, then (FFprobe) beside the FFmpeg in use,
+    # then Media Manglers' own copy, then PATH, then the tool's own install folders. A chosen Python is
+    # kept even when it is missing, so the check says so rather than using another one.
+    bundled = bundled_tools_dir()
+    bundled_dir = str(bundled) if bundled.is_dir() else ""
+    chosen_python = str(configured_paths.get("dependency_python_path") or "").strip()
+    chosen_ffmpeg = str(configured_paths.get("dependency_ffmpeg_path") or "")
+    chosen_ffprobe = str(configured_paths.get("dependency_ffprobe_path") or "")
     powershell_exe = find_tool("powershell").path
-    python_exe = str(configured_paths.get("dependency_python_path") or "").strip() or find_tool(
-        "python"
-    ).path
-    ffmpeg = find_tool("ffmpeg", str(configured_paths.get("dependency_ffmpeg_path") or ""))
-    ffprobe = find_tool(
-        "ffprobe", str(configured_paths.get("dependency_ffprobe_path") or ""), beside=ffmpeg.path
-    )
+    python_exe = chosen_python or find_tool("python", bundled_dir=bundled_dir or None).path
+    ffmpeg = find_tool("ffmpeg", chosen_ffmpeg, bundled_dir=bundled_dir or None)
+    ffprobe = find_tool("ffprobe", chosen_ffprobe, beside=ffmpeg.path, bundled_dir=bundled_dir or None)
     ytdlp = find_tool("ytdlp", str(configured_paths.get("dependency_ytdlp_path") or ""))
     ffmpeg_exe, ffprobe_exe, ytdlp_exe = ffmpeg.path, ffprobe.path, ytdlp.path
     app_root = script_path.parent if script_path else roots[0]
+
+    def where(path: str, chosen: str = "") -> str:
+        return found_by_text(path, chosen=chosen, bundled_dir=bundled_dir or None)
 
     dependencies = [
         DependencyStatus(
@@ -157,6 +169,7 @@ def discover_runtime_resources(configured_paths: dict[str, object] | None = None
             purpose="Runs the proven Video Mangler workflow wrapper.",
             action_label="Install guide" if not powershell_exe else "",
             action_kind="install_guide" if not powershell_exe else "",
+            found_by=where(powershell_exe),
         ),
         DependencyStatus(
             "Python helper runtime",
@@ -167,6 +180,7 @@ def discover_runtime_resources(configured_paths: dict[str, object] | None = None
             purpose="Runs the Media Manglers helper package and Local Whisper.",
             action_label="Check" if python_exe else "Choose path",
             action_kind="check" if python_exe else "choose_python",
+            found_by=where(python_exe, chosen_python),
         ),
         DependencyStatus(
             "FFmpeg",
@@ -177,6 +191,7 @@ def discover_runtime_resources(configured_paths: dict[str, object] | None = None
             purpose="Extracts audio, frames, and clips without changing source media.",
             action_label="Check" if ffmpeg_exe else "Choose path",
             action_kind="check" if ffmpeg_exe else "choose_ffmpeg",
+            found_by=where(ffmpeg_exe, chosen_ffmpeg),
         ),
         DependencyStatus(
             "FFprobe",
@@ -187,6 +202,7 @@ def discover_runtime_resources(configured_paths: dict[str, object] | None = None
             purpose="Reads source duration, tracks, and stream metadata.",
             action_label="Check" if ffprobe_exe else "Choose path",
             action_kind="check" if ffprobe_exe else "choose_ffprobe",
+            found_by=where(ffprobe_exe, chosen_ffprobe),
         ),
         DependencyStatus(
             "yt-dlp",
@@ -198,6 +214,7 @@ def discover_runtime_resources(configured_paths: dict[str, object] | None = None
             purpose="Downloads supported web-video URLs before local review.",
             action_label="Check" if ytdlp_exe else "Choose path",
             action_kind="check" if ytdlp_exe else "choose_ytdlp",
+            found_by=where(ytdlp_exe, str(configured_paths.get("dependency_ytdlp_path") or "")),
         ),
         DependencyStatus(
             "Local Whisper, model, Torch, CUDA, and CPU fallback",
@@ -223,4 +240,5 @@ def discover_runtime_resources(configured_paths: dict[str, object] | None = None
         packaged=is_packaged_app(),
         ytdlp_exe=ytdlp_exe,
         dependencies=dependencies,
+        bundled_dir=bundled_dir,
     )

@@ -64,6 +64,7 @@ from .recording_records import (  # noqa: F401 - the library's storage, kept und
 from .review_inbox import SUPPORTED_EXTENSIONS, iter_media_files
 from .scratch import scratch_root
 from .user_folders import recordings_drive_problem, set_recordings_folders
+from .whisper_models import ModelNotApproved
 
 # What a scan reads from a recording. A change here reads every recording again, so it changes only
 # when what is read changes; rules that work from what was read are RULES_VERSION.
@@ -1032,7 +1033,9 @@ def scan(options: ScanOptions) -> dict[str, Any]:
                     summary["skipped"] += 1
                     _say(options, {"kind": "file_skipped", "index": index, "total": len(work), "path": str(path)})
                     continue
-                except ScanStopped:
+                except (ScanStopped, ModelNotApproved):
+                    # Installer plan, Stage 3: a model not approved is no fault of this file; the scan stops once,
+                    # with what to do, and every recording finished so far is kept.
                     raise
                 except Exception as exc:  # noqa: BLE001 - one bad file never stops the scan
                     if not Path(path).exists() or not all(Path(folder).is_dir() for folder in options.folders):
@@ -1077,6 +1080,8 @@ def scan(options: ScanOptions) -> dict[str, Any]:
             summary["status"] = "completed"
         except ScanStopped as exc:
             summary.update({"status": "drive_not_reachable", "message": str(exc)})
+        except ModelNotApproved as exc:
+            summary.update({"status": "model_not_approved", "message": str(exc)})
         finally:
             connection.execute("UPDATE scan_runs SET finished_utc = ?, status = ?, detail = ? WHERE run_id = ?",
                                (_now(), summary["status"], json.dumps({k: v for k, v in summary.items() if k != "errors"}),
@@ -1383,6 +1388,8 @@ def deep_scan_from_request(payload: dict[str, Any]) -> dict[str, Any]:
             try:
                 results.append(deep_scan(connection, int(recording_id), options, root=root,
                                          glossary=payload.get("glossary_entries")))
+            except ModelNotApproved:
+                raise  # Stage 3: no recording can be transcribed until the model is approved; say so once
             except Exception as exc:  # noqa: BLE001 - one recording never stops the others
                 results.append({"recording_id": int(recording_id), "status": "failed", "error": str(exc)[:300]})
         return {"results": results}

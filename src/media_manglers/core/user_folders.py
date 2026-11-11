@@ -124,6 +124,25 @@ def local_data_root() -> Path:
     return Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state")
 
 
+WORKBENCH_LOCALAPPDATA_ENV = "MEDIA_MANGLERS_WORKBENCH_LOCALAPPDATA"
+ADDONS_FOLDER = "addons"
+
+
+def addons_root() -> Path:
+    """The one folder for what Media Manglers downloads so its own tools can run (the speech libraries,
+    each set in its own ``sp-<set>`` folder inside it): ``%LOCALAPPDATA%\\MediaManglers\\addons`` on Windows.
+
+    It is the only source of this path. The portable and installed editions share it, and the first-launch
+    setup, the readiness rows, ``private_runtime.use_addons`` and the uninstaller's ``file-step
+    remove-addons`` all ask here. The Workbench's local app data override moves it, the same way it moves
+    the library (``recording_records.library_root``), so a test or the build's start-up check never
+    touches the real add-ons."""
+
+    override = os.environ.get(WORKBENCH_LOCALAPPDATA_ENV, "").strip()
+    base = Path(override) if override else local_data_root()
+    return base / APP_FOLDER / ADDONS_FOLDER
+
+
 def temp_root() -> Path:
     """The operating system's temp folder, for short-lived scratch files."""
 

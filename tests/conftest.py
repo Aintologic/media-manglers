@@ -169,6 +169,11 @@ os.environ.setdefault("MEDIA_MANGLERS_SCRATCH_ROOT", str(_USER_FOLDERS / "scratc
 os.environ.setdefault("MEDIA_MANGLERS_RACE_VIDEO_PRIVACY", str(_USER_FOLDERS / "race-video-privacy"))
 # No watched recordings folders unless a test names some: never the operator's saved ones.
 os.environ["MEDIA_MANGLERS_RECORDINGS_FOLDERS"] = ""
+# Installer plan, Stage 3: Whisper's model cache of a test run is a scratch folder, never the operator's own
+# (Whisper and the model check both find it through XDG_CACHE_HOME). A test that needs models puts them there
+# (tests/whisper_test_models.py); a test process started by another keeps that one's folder.
+if "mm-tests-user-folders-" not in os.environ.get("XDG_CACHE_HOME", ""):
+    os.environ["XDG_CACHE_HOME"] = str(_USER_FOLDERS / "xdg-cache")
 
 # 226: a test that swaps modules in sys.modules for one block (mock.patch.dict, for a fake Whisper)
 # also removes, on the way out, every module first imported inside that block. numpy cannot be loaded
