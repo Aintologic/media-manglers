@@ -134,9 +134,8 @@ def addons_root() -> Path:
 
     It is the only source of this path. The portable and installed editions share it, and the first-launch
     setup, the readiness rows, ``private_runtime.use_addons`` and the uninstaller's ``file-step
-    remove-addons`` all ask here. The Workbench's local app data override moves it, the same way it moves
-    the library (``recording_records.library_root``), so a test or the build's start-up check never
-    touches the real add-ons."""
+    remove-addons`` all ask here. The Workbench's local app data override moves it, the same way that
+    override moves the library, so a test or the build's start-up check never touches the real add-ons."""
 
     override = os.environ.get(WORKBENCH_LOCALAPPDATA_ENV, "").strip()
     base = Path(override) if override else local_data_root()
