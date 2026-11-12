@@ -79,12 +79,24 @@ def _read_url(url: str) -> bytes:
         return response.read()
 
 
+def remove_tree(path: Path) -> None:
+    """Remove a work folder the tool made, including the read-only files git keeps its objects in."""
+
+    import stat  # noqa: PLC0415
+
+    def writable_then_again(function, name, _exc):  # noqa: ANN001
+        os.chmod(name, stat.S_IWRITE)
+        function(name)
+
+    if path.exists():
+        shutil.rmtree(path, onexc=writable_then_again)
+
+
 def git_archive(repo: str, commit: str, target: Path, prefix: str, work: Path) -> Path:
     """The tree of ``commit`` as a .tar.gz, fetched by its commit id: git checks every object against it."""
 
     clone = work / ("git-" + hashlib.sha256(f"{repo}@{commit}".encode()).hexdigest()[:12])
-    if clone.exists():
-        shutil.rmtree(clone)
+    remove_tree(clone)
     clone.mkdir(parents=True)
 
     def git(*args: str) -> str:
@@ -97,7 +109,7 @@ def git_archive(repo: str, commit: str, target: Path, prefix: str, work: Path) -
         raise SystemExit(f"{repo} gave {found}, not the pinned {commit}.")
     target.parent.mkdir(parents=True, exist_ok=True)
     git("archive", "--format=tar.gz", f"--prefix={prefix}/", "-o", str(target), "FETCH_HEAD")
-    shutil.rmtree(clone, ignore_errors=True)
+    remove_tree(clone)
     return target
 
 
@@ -215,7 +227,7 @@ def build_bundle(out: Path, *, ci_cache: Path | None, pins_file: Path = PINS) ->
     source, work = out / "source", out / "work"
     for folder in (source, out / "parts"):
         if folder.exists():
-            shutil.rmtree(folder)
+            remove_tree(folder)
     source.mkdir(parents=True)
     work.mkdir(parents=True, exist_ok=True)
     manifest: list[dict[str, Any]] = []
@@ -275,7 +287,7 @@ def build_bundle(out: Path, *, ci_cache: Path | None, pins_file: Path = PINS) ->
         sums.append(f"{_hash(source / extra)}  {extra}")
     (source / "SHA256SUMS.txt").write_text("\n".join(sums) + "\n", encoding="utf-8")
     parts = pack_parts(source, out / "parts", f"ffmpeg-{ffmpeg['describe']}-win64-gpl-shared-8.1-source")
-    shutil.rmtree(work, ignore_errors=True)
+    remove_tree(work)
     total = sum(path.stat().st_size for path in source.rglob("*") if path.is_file())
     return {"source": str(source), "files": len(manifest) + 3, "bytes": total, "crates": crates,
             "stages_from_ci_cache": cache["from_cache"], "stages_fetched_by_commit": fetched,

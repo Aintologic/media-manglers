@@ -164,6 +164,17 @@ class SourceBundleTests(unittest.TestCase):
         target.write_bytes(b"archive")
         return target
 
+    def test_a_work_folder_with_gits_read_only_files_is_removed(self) -> None:
+        import os
+        import stat
+
+        pack = self.root / "work" / "git-1" / ".git" / "objects" / "pack" / "pack-1.idx"
+        pack.parent.mkdir(parents=True)
+        pack.write_bytes(b"index")
+        os.chmod(pack, stat.S_IREAD)  # git keeps its pack files read-only
+        self.bundle.remove_tree(self.root / "work")
+        self.assertFalse((self.root / "work").exists())
+
     def test_the_lock_marks_the_pinned_build_not_for_release(self) -> None:
         blockers = LOCK["components"]["ffmpeg"].get("publish_blockers") or []
         self.assertTrue(any("zvbi" in item for item in blockers))
