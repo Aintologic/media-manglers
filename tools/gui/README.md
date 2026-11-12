@@ -84,7 +84,14 @@ The required output is:
 dist\VideoManglerWorkbench\VideoManglerWorkbench.exe
 ```
 
-The standalone folder also contains the proven `Video Mangler.ps1` backend, the `python-core` helper source, glossaries, icon, version, license, third-party notices, and a `licenses` folder with the licence texts of the components the package bundles. PowerShell, a usable external Python helper runtime, the `ffmpeg.exe`/`ffprobe.exe` programs, and Whisper runtime/models are detected at runtime rather than falsely claimed as self-contained.
+The standalone folder also contains the proven `Video Mangler.ps1` backend, the `python-core` helper source, glossaries, icon, version, license, third-party notices, and a `licenses` folder with the licence texts of the components the package bundles.
+
+It also carries Media Manglers' own tools in its `runtime` folder (installer plan, Stages 4 and 5), assembled by `tools\installer\Build-PackagedRuntime.ps1` from parts pinned by SHA-256 in `tools\installer\components.lock.json`. The build fetches each part once into `AREA51\TEMP\workbench-build\components` (a `.partial` file, checked, then renamed) and stops on any mismatch:
+
+- `runtime\python`: the Python 3.12.10 embeddable package, Microsoft's C++ runtime DLLs beside `python.exe` (accepted only when they match their pins and carry a valid Microsoft signature), a static `python312._pth`, the Whisper code (a wheel built here from the pinned source with the pinned setuptools, no pip), truststore, the start-up hook that gives this Python its downloaded speech libraries, and `speech-lock.json` (the speech libraries the first-launch setup downloads). Everything is compiled to bytecode at build time.
+- `runtime\ffmpeg`: `bin` from the pinned FFmpeg-Builds win64 gpl-shared 8.1 build, without ffplay, with its `LICENSE.txt` and a `README.txt` saying where its source is offered. The build checks it against `tools\installer\ffmpeg-needs.json`, every encoder, decoder, filter and format the app uses, and stops if one is missing.
+
+The speech libraries and Whisper models are not in the package; the app downloads them on the user's PC after asking. `tools\installer\ffmpeg_source_bundle.py` builds FFmpeg's complete Corresponding Source, and a mirror of the pinned FFmpeg file, from `tools\installer\ffmpeg-source-pins.json`; both are kept for publishing next to a release, never published by the build.
 
 The checked-in Per-Monitor V2 manifest is embedded by PyInstaller while it assembles the executable. The wrapper reads that resource back with the Windows SDK manifest tool and fails the build if `PerMonitorV2` is absent; it does not rewrite the finished PyInstaller executable.
 
@@ -97,8 +104,9 @@ Use `-DryRun` to inspect the selected deployment command without building. Use `
 The package hands out third-party binaries, so their notices travel with it:
 
 - Qt for Python (PySide6/Shiboken) and the Qt libraries and plugins it carries, under the LGPL-3.0;
-- the FFmpeg libraries inside Qt Multimedia (`avcodec`, `avformat`, `avutil`, `swresample`, `swscale`), which the built-in player uses, under the LGPL-2.1 or later. These are not the `ffmpeg.exe`/`ffprobe.exe` programs the reviews need, which the operator installs;
-- the Python runtime, the Mesa software OpenGL that Qt ships, and the PyInstaller bootloader.
+- the FFmpeg libraries inside Qt Multimedia (`avcodec`, `avformat`, `avutil`, `swresample`, `swscale`), which the built-in player uses, under the LGPL-2.1 or later. These are not the `ffmpeg.exe`/`ffprobe.exe` programs the reviews use, which are the separate GPL build in `runtime\ffmpeg`;
+- the Python runtime, the Mesa software OpenGL that Qt ships, and the PyInstaller bootloader;
+- in `runtime`: FFmpeg 8.1 (GPL-3.0-or-later), Python 3.12.10, the Microsoft C++ runtime, openai-whisper and truststore.
 
 `THIRD_PARTY_NOTICES.txt` names each one with its version, licence, licence text and source, and says how a recipient replaces the LGPL libraries: the one-folder layout keeps every Qt and FFmpeg library a separate file under `_internal\PySide6` and `_internal\shiboken6`. The licence texts are copied into the package's `licenses` folder from `licenses\` in the repository, plus the Python runtime's `LICENSE.txt` and PyInstaller's `COPYING.txt` from the build runtime. The build fails if a text or a notice entry is missing, if the notice does not name the bundled PySide6 version, or if the package ships an FFmpeg library the notice does not list.
 

@@ -6,7 +6,8 @@
 - ``bind_action``: wires a button to its action so the feedback shows within a quarter of a second
   and the button cannot be fired twice while it works.
 - ``JobBanner``: a long job, on the page where it was started: what is running, a bar, percent and
-  time left when known, and "Open in Queue / Progress", which opens that job.
+  time left when known, and "Open in Queue / Progress", which opens that job. ``float_at_top`` keeps one
+  across the top of every page instead (the first-launch setup, which no page starts).
 - ``StepBar``: numbered steps, done / current / later.
 - ``SegmentedControl``: two to four exclusive choices in one rounded box (the text size).
 - ``PageStack``: the page area; each page sits in a scroll area, so large text scrolls instead of
@@ -646,6 +647,9 @@ class JobBanner(QFrame):
                 if state == "completed" and self.done_seconds > 0:
                     self._timer.start(int(self.done_seconds * 1000))
         self.numbers_label.setVisible(bool(self.numbers_label.text()))
+        # The whole text on hover too, in case a long message is more than the banner shows.
+        self.title_label.setToolTip(self.title_label.text())
+        self.numbers_label.setToolTip(self.numbers_label.text())
         _restyle(self, "state", "" if state == "active" else state)
         _restyle(self.bar, "operatorState", "active" if state == "active" else state)
         self.setAccessibleName(f"Job: {self.title_label.text()}")
@@ -671,6 +675,57 @@ class JobBanner(QFrame):
                 self.dismiss()
             return
         self.show_job(info)
+
+
+class _TopFloat(QObject):
+    """Keeps a widget across the top of its parent, above every page, below another floating widget when that
+    shows. Its height follows its text as that changes; with ``reserve`` the parent's layout leaves that much room at
+    its top while it shows, so it never covers a page's title."""
+
+    def __init__(self, widget: QWidget, below: QWidget | None, reserve: QLayout | None) -> None:
+        super().__init__(widget)
+        self.widget, self.below, self.reserve = widget, below, reserve
+        self._placing = False
+        parent = widget.parentWidget()
+        if parent is not None:
+            parent.installEventFilter(self)
+        widget.installEventFilter(self)
+        if below is not None:
+            below.installEventFilter(self)
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+        if event.type() in (QEvent.Type.Resize, QEvent.Type.Show, QEvent.Type.Hide, QEvent.Type.LayoutRequest):
+            self.place()
+        return False
+
+    def place(self) -> None:
+        parent = self.widget.parentWidget()
+        if parent is None or self._placing:
+            return
+        self._placing = True
+        try:
+            top = self.below.height() if self.below is not None and self.below.isVisible() else 0
+            height = 0
+            if not self.widget.isHidden():
+                width = parent.width()
+                height = (self.widget.heightForWidth(width) if self.widget.hasHeightForWidth() else -1)
+                height = max(height, self.widget.sizeHint().height(), self.widget.minimumSizeHint().height())
+                self.widget.setGeometry(0, top, width, height)
+                self.widget.raise_()
+            if self.reserve is not None:
+                room = top + height if height else 0
+                margins = self.reserve.contentsMargins()
+                if margins.top() != room:
+                    self.reserve.setContentsMargins(margins.left(), room, margins.right(), margins.bottom())
+        finally:
+            self._placing = False
+
+
+def float_at_top(widget: QWidget, *, below: QWidget | None = None, reserve: QLayout | None = None) -> None:
+    """Float ``widget`` (a job banner shown on every page) across the top of its parent, below ``below``; with
+    ``reserve`` (the parent's layout) the pages start below it while it shows."""
+
+    widget._top_float = _TopFloat(widget, below, reserve)  # type: ignore[attr-defined]
 
 
 # Step bar ---------------------------------------------------------------------------------------

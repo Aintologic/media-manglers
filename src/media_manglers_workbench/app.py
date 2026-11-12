@@ -18,6 +18,7 @@ import subprocess
 import sys
 import threading
 import time
+from types import SimpleNamespace
 from typing import Any, Callable
 
 from PySide6.QtCore import QByteArray, QModelIndex, QSignalBlocker, QSize, Qt, QThread, QTimer, QUrl, Signal
@@ -67,6 +68,7 @@ from media_manglers.core import (
     review_orchestration,
 )
 from media_manglers.core import app_cache, app_locks, inbox_move, inbox_records, recording_records, safe_write, speech_facts
+from media_manglers.core import speech_setup
 from .track_roles import SETTING_KEY as TRACK_ROLES_SETTING_KEY
 from media_manglers.core.recording_records import Records, import_legacy_settings
 from media_manglers.core.user_folders import recordings_drive_problem, set_recordings_folders, temporary_folder_problem
@@ -102,6 +104,7 @@ from .bug_reports import BugReportsPage
 from .build_identity import resolve_build_identity
 from .command_builder import CommandSpec, build_workflow_command, validate_effective_command
 from .dependencies import (
+    SPEECH_ROW,
     VOICE_MODEL,
     DependencyCheckStopped,
     DependencyPreflightResult,
@@ -183,6 +186,7 @@ from .ui_parts import (
     SegmentedControl,
     WrappingTabStrip,
     bind_action,
+    float_at_top,
     line_icon,
     polish_forms,
     polish_views,
@@ -193,7 +197,7 @@ from .ui_parts import (
     warn,
     work_done_text,
 )
-from .tool_sources import bundled_tool, needs_download, tool_source
+from .tool_sources import FOUND_ON_PC, bundled_tool, needs_download, tool_source
 from .video_open import (
     PlaySequence,
     PlayTarget,
@@ -407,6 +411,7 @@ TRANSIENT_PROFILE_KEYS = {
     "dependency_ffprobe_path",
     "dependency_ytdlp_path",
     "bundled_tools_question_answered",
+    "speech_setup_declined",
     "whisper_model_download_approved",
     "evidence_audio_stream_index",
     "evidence_audio_stream_selection_confirmed",
@@ -840,22 +845,22 @@ class DependencyCheckThread(QThread):
             self.check_ready.emit(result)
 
 
-class ModelDownloadThread(QThread):
-    """Installer plan, Stage 3: the Whisper model download the operator approved, and nothing else.
-
-    It runs the helper's ``whisper-model-download`` in the Python that runs Whisper (ours, or one of yours kept
-    under an exception), which writes each model to a partial file, checks it against the SHA-256 Whisper
-    published and only then puts it in place. Progress comes from a small file the helper keeps up to date.
-    Stopping (the Workbench closing) ends the helper; the partial file it leaves is removed at the next try."""
+class HelperDownloadThread(QThread):
+    """A download job the operator agreed to, run by a helper command in a Python of its own (installer plan,
+    Stages 3 and 4): the request goes in a file, the helper keeps a small progress file up to date, and its result
+    file says how it went. Stopping (the Workbench closing) ends the helper; what it leaves under a temporary name
+    is never used and is removed at the next try."""
 
     progress_changed = Signal(str)
     download_finished = Signal(bool, str)
 
-    def __init__(self, argv: list[str], request: Path, result: Path, progress: Path, models: list[str]) -> None:
+    def __init__(self, argv: list[str], request: Path, result: Path, progress: Path, payload: dict[str, Any]) -> None:
         super().__init__()
         self.argv = list(argv)
         self.request, self.result, self.progress = request, result, progress
-        self.models = list(models)
+        self.payload = {**payload, "progress_file": str(progress)}
+        # The latest percent the helper reported, or None while nothing is measured (the banner's moving bar).
+        self.percent: int | None = None
         self._stopped = threading.Event()
         self._process: subprocess.Popen[bytes] | None = None
 
@@ -869,20 +874,25 @@ class ModelDownloadThread(QThread):
         if process is not None:
             _end_process_tree(process)  # type: ignore[arg-type]
 
-    def _progress_text(self) -> str:
+    def _progress_data(self) -> dict[str, Any]:
         try:
             data = json.loads(self.progress.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            return ""
-        done, total = int(data.get("done") or 0), int(data.get("total") or 0)
-        name = str(data.get("model") or "")
-        amount = f"{done / 1_000_000:,.0f} MB of {total / 1_000_000:,.0f} MB" if total else f"{done / 1_000_000:,.0f} MB"
-        return f"{name}: {amount}" + (f" ({100 * done // total}%)" if total else "")
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def progress_text(self, data: dict[str, Any]) -> str:
+        percent = data.get("percent")
+        self.percent = int(percent) if isinstance(percent, (int, float)) else None
+        return str(data.get("text") or "")
+
+    def finished_text(self, data: dict[str, Any]) -> str:
+        return "Done."
 
     def run(self) -> None:
         try:
             self.request.parent.mkdir(parents=True, exist_ok=True)
-            write_json_file(self.request, {"payload": {"models": self.models, "progress_file": str(self.progress)}})
+            write_json_file(self.request, {"payload": self.payload})
             self._process = subprocess.Popen(self.argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                              stderr=subprocess.DEVNULL,
                                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -894,7 +904,7 @@ class ModelDownloadThread(QThread):
             if self.stopped:
                 _end_process_tree(self._process)  # type: ignore[arg-type]
                 return
-            text = self._progress_text()
+            text = self.progress_text(self._progress_data())
             if text and text != shown:
                 shown = text
                 self.progress_changed.emit(text)
@@ -906,10 +916,51 @@ class ModelDownloadThread(QThread):
         except (OSError, ValueError):
             outcome = {"ok": False, "error": "The download ended without saying how it went."}
         if outcome.get("ok"):
-            names = ", ".join(str(item.get("name")) for item in (outcome.get("data") or {}).get("models") or [])
-            self.download_finished.emit(True, f"Downloaded and checked: {names or ', '.join(self.models)}.")
+            self.download_finished.emit(True, self.finished_text(outcome.get("data") or {}))
         else:
             self.download_finished.emit(False, str(outcome.get("error") or "The download did not finish."))
+
+
+class ModelDownloadThread(HelperDownloadThread):
+    """Installer plan, Stage 3: the Whisper model download the operator approved, and nothing else.
+
+    It runs the helper's ``whisper-model-download``, which fetches each model through the one shared downloader:
+    a partial file, checked against the SHA-256 Whisper published, and only then put in place."""
+
+    def __init__(self, argv: list[str], request: Path, result: Path, progress: Path, models: list[str]) -> None:
+        super().__init__(argv, request, result, progress, {"models": list(models)})
+        self.models = list(models)
+
+    def progress_text(self, data: dict[str, Any]) -> str:
+        if not data:
+            return ""
+        done, total = int(data.get("done") or 0), int(data.get("total") or 0)
+        self.percent = 100 * done // total if total else None
+        name = str(data.get("model") or "")
+        amount = f"{done / 1_000_000:,.0f} MB of {total / 1_000_000:,.0f} MB" if total else f"{done / 1_000_000:,.0f} MB"
+        return f"{name}: {amount}" + (f" ({100 * done // total}%)" if total else "")
+
+    def finished_text(self, data: dict[str, Any]) -> str:
+        names = ", ".join(str(item.get("name")) for item in data.get("models") or [])
+        return f"Downloaded and checked: {names or ', '.join(self.models)}."
+
+
+class SpeechSetupThread(HelperDownloadThread):
+    """Installer plan, Stage 4: the shared first-launch setup the operator agreed to, run by ``speech-setup`` in
+    Media Manglers' own Python: the speech libraries (unless a Python of yours is kept), then base.en."""
+
+    def __init__(self, argv: list[str], request: Path, result: Path, progress: Path, *, libraries: bool,
+                 models: list[str], repair: bool = False) -> None:
+        super().__init__(argv, request, result, progress,
+                         {"libraries": bool(libraries), "repair": bool(repair), "models": list(models)})
+
+    def finished_text(self, data: dict[str, Any]) -> str:
+        reused = [str(item.get("name")) for item in data.get("models") or [] if item.get("reused")]
+        note = f" The Whisper model {', '.join(reused)} already on this PC was used as it is." if reused else ""
+        notes = (data.get("libraries") or {}).get("notes") or []
+        later = (" Some older files could not be removed yet; the next setup removes them."
+                 if any("not removed yet" in str(item) for item in notes) else "")
+        return "Speech recognition is set up." + note + later
 
 
 class AdvancedSettingsDialog(QDialog):
@@ -1201,6 +1252,11 @@ class WorkbenchWindow(QMainWindow):
         self.dependency_check_thread: DependencyCheckThread | None = None
         # Installer plan, Stage 3: the Whisper model download the operator approved, while it runs.
         self.model_download_thread: ModelDownloadThread | None = None
+        # Installer plan, Stage 4: the shared first-launch setup, while it runs; whether this launch may ask its
+        # question (not during the build's smoke launch or an offscreen run); and whether it has asked it already.
+        self.speech_setup_thread: SpeechSetupThread | None = None
+        self.first_launch_questions = True
+        self._speech_question_asked = False
         self.run_started_monotonic = 0.0
         self.review_inbox_diagnostics: list[str] = []
         self.run_log_lines: list[str] = []
@@ -1431,6 +1487,12 @@ class WorkbenchWindow(QMainWindow):
         self.missing_tools_notice = MissingToolsNotice(
             self.open_tool_download_page, self.open_dependency_setup, content
         )
+        # Installer plan, Stage 4: the first-launch setup's job banner sits across the top of every page, below the
+        # missing-tools notice when that shows, so its progress is seen wherever the operator is; the pages start below
+        # it while it shows, so it never covers a page's title.
+        self.setup_banner = JobBanner(content, link_text="Open Settings > Dependencies")
+        self.setup_banner.open_requested.connect(lambda _token: self.open_dependency_setup())
+        float_at_top(self.setup_banner, below=self.missing_tools_notice, reserve=content_layout)
         root.addWidget(nav)
         root.addWidget(content, 1)
         self.setCentralWidget(shell)
@@ -5001,6 +5063,11 @@ class WorkbenchWindow(QMainWindow):
             torch = self._dependency_by_key("torch")
             cpu = self._dependency_by_key("cpu_fallback")
             model = self._dependency_by_key("whisper_model")
+            speech = self.speech_blockers()
+            if speech:
+                # Installer plan, Stage 4: one plain line instead of three rows' worth of repair advice.
+                errors.extend(speech)
+                whisper = torch = cpu = None
             if whisper is not None and not whisper.ready:
                 errors.append(
                     "Local Whisper needs setup. Open Settings > Dependencies for the install or repair guidance."
@@ -5723,6 +5790,12 @@ class WorkbenchWindow(QMainWindow):
         if self.runner_thread is not None:
             self.report_run_in_progress()
             return False
+        if kind in SPEECH_RUN_KINDS:
+            # Installer plan, Stage 4: every feature that makes a transcript says so plainly before it starts.
+            blockers = self.speech_blockers()
+            if blockers:
+                warn(self, "Speech recognition is not set up", "\n\n".join(blockers))
+                return False
         if kind == "bug_reports":
             # Installer plan, Stage 3: Find my bug reports checks its Whisper models like the main Start does.
             blockers = self.model_blockers([str(settings.get("whisper_model") or ""), VOICE_MODEL])
@@ -9168,7 +9241,11 @@ class WorkbenchWindow(QMainWindow):
         self.refresh_dependency_status()
         self.refresh_review_summary()
         self.missing_tools_notice.show_once(self.resources.dependencies)
-        self.ask_about_saved_tool_paths()
+        if self.ask_about_saved_tool_paths():
+            return  # the bundled copies were chosen: the check runs again, and its result asks what follows
+        # Installer plan, Stage 4: the one first-launch question, once, until speech recognition is set up or the
+        # operator chose Not now.
+        self.offer_speech_setup(first_launch=True)
 
     # Installer plan, Stage 1: a path an earlier version saved may be one that version found on this PC, not one
     # the operator chose. Once, when such a path differs from the copy bundled with Media Manglers, the operator
@@ -9212,10 +9289,13 @@ class WorkbenchWindow(QMainWindow):
         box.exec()
         return box.clickedButton() is use
 
-    def ask_about_saved_tool_paths(self) -> None:
+    def ask_about_saved_tool_paths(self) -> bool:
+        """Ask once; True when the bundled copies were chosen and readiness is checked again."""
+
         differing = self.saved_paths_differing_from_bundled()
-        if not differing:
-            return
+        # Not in a launch nobody can answer (the build's smoke launch, an offscreen or timed run).
+        if not differing or not getattr(self, "first_launch_questions", True):
+            return False
         use_bundled = self._choose_bundled_tools([saved for _setting, saved in differing])
         self.app_settings["bundled_tools_question_answered"] = True
         if use_bundled:
@@ -9227,6 +9307,7 @@ class WorkbenchWindow(QMainWindow):
         if use_bundled:
             self.resources = discover_runtime_resources(self.app_settings)
             QTimer.singleShot(0, self.start_dependency_check)
+        return use_bundled
 
     def _dependency_check_failed(self, _details: str) -> None:
         self.resources.dependencies = [
@@ -9413,6 +9494,10 @@ class WorkbenchWindow(QMainWindow):
             )
             if response == QMessageBox.StandardButton.Yes:
                 self.start_model_download([model])
+            return
+        if dependency.action_kind == "speech_setup":
+            # Installer plan, Stage 4: Set up asks the same one question the first launch asks.
+            self.offer_speech_setup()
             return
         guidance = {
             "repair_app": (
@@ -9920,6 +10005,16 @@ class WorkbenchWindow(QMainWindow):
                 _STILL_STOPPING.add(download)
                 download.finished.connect(functools.partial(_STILL_STOPPING.discard, download))
             self._write_workbench_log("Whisper model download stopped because the Workbench closed.")
+        # Installer plan, Stage 4: the first-launch setup stops the same way. A set is renamed into place only
+        # when complete, so what it leaves under its temporary name is never used; the next Set up removes it and
+        # reuses every download that still matches its checksum.
+        if self.speech_setup_thread is not None:
+            setup = self.speech_setup_thread
+            setup.cancel()
+            if not setup.wait(3000):
+                _STILL_STOPPING.add(setup)
+                setup.finished.connect(functools.partial(_STILL_STOPPING.discard, setup))
+            self._write_workbench_log("Speech recognition setup stopped because the Workbench closed.")
         # 135: a waveform build stops at once, keeping what it measured; it never holds the close up.
         self.levels_service.shutdown()
         # 220: the library's connection is closed so its write-ahead log is folded in.
@@ -9942,6 +10037,11 @@ class WorkbenchWindow(QMainWindow):
         models = [name for name in dict.fromkeys(str(item or "").strip() for item in models) if name]
         if not models or self.model_download_thread is not None:
             return False
+        if self.speech_setup_thread is not None:
+            # Installer plan, Stage 4: one download job at a time; the setup fetches base.en itself.
+            self.dependency_summary.setText("Speech recognition is being set up now (it fetches base.en too). "
+                                            "Approve the download again when it has finished, if it is still needed.")
+            return False
         if not self.resources.python_exe or self.resources.backend_source_root is None:
             self.dependency_summary.setText(
                 "The model cannot be downloaded until the Python that runs Whisper is ready. Fix the Python rows, "
@@ -9950,7 +10050,9 @@ class WorkbenchWindow(QMainWindow):
         work = Path(str(self.app_settings.get("temp_folder") or default_temp_folder())) / (
             f"model-download-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
         request, result = work / "request.json", work / "result.json"
-        argv = cli_command(self.resources, "whisper-model-download", request, result).argv
+        # Installer plan, Stage 4: run by Media Manglers' own Python when this copy has one, so the one shared
+        # downloader checks the certificate through Windows; the model lands in the same Whisper cache.
+        argv = cli_command(self._download_runner(), "whisper-model-download", request, result).argv
         thread = ModelDownloadThread(argv, request, result, work / "progress.json", models)
         names = ", ".join(models)
         thread.progress_changed.connect(lambda text: self.dependency_check_banner.show_job(JobInfo(
@@ -9984,6 +10086,178 @@ class WorkbenchWindow(QMainWindow):
         worker.deleteLater()
         if self.model_download_thread is worker:
             self.model_download_thread = None
+
+    # Installer plan, Stage 4: the shared first-launch setup ----------------------------------------------------
+
+    SPEECH_SETUP_TOKEN = "speech-setup"
+    SPEECH_SETUP_TITLE = "Setting up speech recognition"
+
+    def private_python(self) -> str:
+        """Media Manglers' own Python in this application folder, or "" (a run from the source)."""
+
+        bundled_dir = str(getattr(self.resources, "bundled_dir", "") or "")
+        python = bundled_tool("python", bundled_dir) if bundled_dir else ""
+        return python if python and Path(python).is_file() else ""
+
+    def _download_runner(self) -> Any:
+        """Where a download job runs: Media Manglers' own Python when this copy has one (it checks every
+        certificate through Windows and changes nothing in any other Python), otherwise the Workbench's Python."""
+
+        python = self.private_python()
+        if not python:
+            return self.resources
+        return SimpleNamespace(python_exe=python, backend_source_root=self.resources.backend_source_root)
+
+    def speech_setup_needs(self) -> dict[str, Any] | None:
+        """What the first-launch setup would fetch now, from the readiness rows: {"libraries": bool, "repair": bool,
+        "models": [...], "bytes": int, "yours": bool}. ``yours`` is True when a Python of the operator's is in use
+        (it has its own speech libraries). None when nothing is missing, or when this copy has no setup of its own (a
+        run from the source). A damaged base.en is not here: it is never replaced without its own approval
+        (Stage 3)."""
+
+        row = self._dependency_by_key(SPEECH_ROW)
+        if row is None or not self.private_python():
+            return None
+        libraries = row.status == "needs_setup"
+        voice = next((item for item in self.resources.dependencies
+                      if item.key.startswith("whisper_model") and item.model == VOICE_MODEL), None)
+        models = [VOICE_MODEL] if voice is not None and voice.model_state == "missing" else []
+        if not libraries and not models:
+            return None
+        lock = speech_setup.read_lock(Path(self.resources.bundled_dir).parent)
+        size = (lock.total_bytes if libraries and lock is not None else 0) + (
+            speech_setup.VOICE_MODEL_BYTES if models else 0)
+        return {"libraries": libraries, "repair": libraries and row.model_state == "damaged", "models": models,
+                "bytes": size, "yours": row.found_by == FOUND_ON_PC}
+
+    @staticmethod
+    def speech_setup_question(needs: dict[str, Any]) -> str:
+        """The one question, in the words of the installer plan; only what is missing is named."""
+
+        if needs.get("libraries"):
+            sources = ("the Python Package Index and the Whisper model server" if needs.get("models")
+                       else "the Python Package Index")
+            again = " (again: the copy in your user folder no longer loads)" if needs.get("repair") else ""
+            return (f"Media Manglers needs speech-recognition files to make transcripts{again}: about "
+                    f"{int(needs.get('bytes') or 0) / 1_000_000_000:.2f} GB from {sources}. They are saved in your "
+                    "user folder, not in the program folder. Download now?")
+        models = ", ".join(str(name) for name in needs.get("models") or [])
+        yours = (" Your own Python is used for transcripts and has its own speech libraries, so nothing else is "
+                 "downloaded." if needs.get("yours") else "")
+        return (f"Media Manglers needs the Whisper model {models} (about "
+                f"{int(needs.get('bytes') or 0) / 1_000_000:,.0f} MB) to find which track is your voice.{yours} It "
+                "comes from the Whisper model server and is saved in the Whisper model cache in your user folder. "
+                "Download now?")
+
+    def _ask_speech_setup(self, text: str) -> bool:
+        """The question itself: True for Download, False for Not now (or the window closed). Not now is the default,
+        as in the app's other questions about downloads, so a stray Enter downloads nothing."""
+
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle("Set up speech recognition?")
+        box.setText(text)
+        download = box.addButton("Download", QMessageBox.ButtonRole.AcceptRole)
+        not_now = box.addButton("Not now", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(not_now)
+        box.setEscapeButton(not_now)
+        box.exec()
+        return box.clickedButton() is download
+
+    def offer_speech_setup(self, *, first_launch: bool = False) -> bool:
+        """Ask the one question, and on Download start the setup. At start-up it is asked once, until speech
+        recognition is set up or the operator chose Not now; the row's Set up asks it again whenever chosen."""
+
+        if self.speech_setup_thread is not None:
+            if not first_launch:
+                self.dependency_summary.setText("Speech recognition is being set up now; the bar at the top of the "
+                                                "window shows how far it is.")
+            return False
+        needs = self.speech_setup_needs()
+        if needs is None:
+            return False
+        if first_launch:
+            if (not self.first_launch_questions or self._speech_question_asked
+                    or self.app_settings.get("speech_setup_declined") or self.model_download_thread is not None):
+                return False
+            self._speech_question_asked = True
+        if not self._ask_speech_setup(self.speech_setup_question(needs)):
+            self.app_settings["speech_setup_declined"] = True
+            self.save_app_settings()
+            self._write_workbench_log("Speech recognition setup: Not now.")
+            self.dependency_summary.setText(
+                "Speech recognition is not set up. Choose Set up on its row in Settings > Dependencies when you want "
+                "it; transcripts need it, and everything else works without it.")
+            return False
+        return self.start_speech_setup(libraries=bool(needs["libraries"]), models=list(needs["models"]),
+                                       repair=bool(needs.get("repair")), yours=bool(needs.get("yours")))
+
+    def start_speech_setup(self, *, libraries: bool, models: list[str], repair: bool = False,
+                           yours: bool = False) -> bool:
+        """Run the shared first-launch setup in Media Manglers' own Python, with its job banner across the top of
+        every page; readiness is checked again when it ends. One download job runs at a time: the setup fetches
+        base.en too, so it waits for an approved model download to finish, and the other way round."""
+
+        if self.speech_setup_thread is not None or not self.private_python() or self.resources.backend_source_root is None:
+            return False
+        if self.model_download_thread is not None:
+            self.dependency_summary.setText("A Whisper model download is running. Choose Set up again when it has "
+                                            "finished.")
+            return False
+        work = Path(str(self.app_settings.get("temp_folder") or default_temp_folder())) / (
+            f"speech-setup-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
+        request, result = work / "request.json", work / "result.json"
+        argv = cli_command(self._download_runner(), "speech-setup", request, result).argv
+        thread = SpeechSetupThread(argv, request, result, work / "progress.json", libraries=libraries, models=models,
+                                   repair=repair)
+        thread.progress_changed.connect(lambda text, worker=thread: self._show_speech_setup(text, worker.percent))
+        thread.download_finished.connect(lambda ok, message, folder=work: self._speech_setup_finished(ok, message, folder))
+        thread.finished.connect(lambda worker=thread: self._speech_setup_stopped(worker))
+        self.speech_setup_thread = thread
+        self._show_speech_setup("Starting: the downloads go to your user folder only", None)
+        self.dependency_summary.setText("Setting up speech recognition. You can keep working meanwhile.")
+        what = ("yes, set up again" if repair else "yes" if libraries
+                else "no, the Python in use has its own" if yours else "no, already set up")
+        self._write_workbench_log(f"Speech recognition setup agreed and started (speech libraries: {what}; "
+                                  f"models: {', '.join(models) or 'none'}).")
+        thread.start()
+        return True
+
+    def speech_blockers(self) -> list[str]:
+        """Installer plan, Stage 4: one plain line when Media Manglers' own Python is in use and its speech
+        recognition is not set up (or no longer loads); [] otherwise."""
+
+        row = self._dependency_by_key(SPEECH_ROW)
+        if row is None or row.status != "needs_setup":
+            return []
+        if self.speech_setup_thread is not None:
+            return ["Speech recognition is being set up now, so transcripts cannot be made yet. Start again when the "
+                    "bar at the top of the window says it is done."]
+        return ["Speech recognition is not set up yet, so transcripts cannot be made. Open Settings > Dependencies "
+                "and choose Set up on its row."]
+
+    def _show_speech_setup(self, text: str, percent: int | None) -> None:
+        self.setup_banner.show_job(JobInfo(token=self.SPEECH_SETUP_TOKEN, title=text or self.SPEECH_SETUP_TITLE,
+                                           state="active", percent=percent))
+
+    def _speech_setup_finished(self, ok: bool, message: str, work: Path) -> None:
+        self.setup_banner.show_job(JobInfo(token=self.SPEECH_SETUP_TOKEN, title=self.SPEECH_SETUP_TITLE,
+                                           state="completed" if ok else "attention", detail=message))
+        self.dependency_summary.setText(message)
+        self._write_workbench_log(f"Speech recognition setup {'finished' if ok else 'failed'}: {message}")
+        if ok:
+            self.app_settings["speech_setup_declined"] = False
+            self.save_app_settings()
+        try:
+            safe_write.remove_disposable_tree(work, within=work.parent)
+        except OSError:
+            pass  # the Workbench's own temporary folder; clean-up removes it later
+        QTimer.singleShot(0, self.start_dependency_check)
+
+    def _speech_setup_stopped(self, worker: SpeechSetupThread) -> None:
+        worker.deleteLater()
+        if self.speech_setup_thread is worker:
+            self.speech_setup_thread = None
 
     def model_blockers(self, models: list[str]) -> list[str]:
         """Installer plan, Stage 3: why each of ``models`` cannot be used yet, from its readiness row: missing or not
@@ -10060,6 +10334,10 @@ SMOKE_STACK_FILE = "smoke-launch-stacks.txt"
 SMOKE_STACK_AFTER_SECONDS = 15   # the build waits 30 seconds, so the stacks are written by then
 
 
+# Installer plan, Stage 4: every feature that makes a transcript through the shared runner (Find my bug reports, the
+# raw bin's scans, the AI Video Editor's Prepare); the main Start checks the same in validate_current_run.
+SPEECH_RUN_KINDS = frozenset({"bug_reports", "raw_scan", "raw_deep_scan", "editor_prepare"})
+
 ALREADY_OPEN_TITLE = "Media Manglers is already open"
 ALREADY_OPEN_TEXT = (
     "Media Manglers is already open in another window. Only one can run at a time, because both would use the "
@@ -10104,6 +10382,10 @@ def main(argv: list[str] | None = None) -> int:
     window = WorkbenchWindow(
         review_inbox_exact_source_paths=list(args.review_inbox_exact_source)
     )
+    # Installer plan, Stage 4: the first-launch questions wait for a launch someone can answer; the build's smoke
+    # launch, offscreen runs and timed runs (a screenshot, an exit after a delay) never show them or record an answer.
+    window.first_launch_questions = not (args.smoke_test or args.offscreen or args.capture_screenshot
+                                         or args.exit_after_ms)
     if args.open_package:
         try:
             window.load_package(args.open_package)

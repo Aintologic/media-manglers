@@ -1,0 +1,802 @@
+{
+  "purpose": "Everything the FFmpeg Media Manglers bundles was built from, so its complete Corresponding Source can be built on any PC (tools/installer/ffmpeg_source_bundle.py). Worked out from FFmpeg-Builds at the release's own commit for TARGET=win64, VARIANT=gpl-shared, ADDINS=8.1, and checked against the configure line inside the shipped libraries.",
+  "binary": {
+    "file": "ffmpeg-n8.1.3-27-g8dca1586f4-win64-gpl-shared-8.1.zip",
+    "release": "autobuild-2026-10-31-12-59",
+    "sha256": "3adc00b67118a8c4bdd6624a000e139df283b1eeb8b126fcec4849bd5b778dd4",
+    "size": 89702793
+  },
+  "ffmpeg": {
+    "repo": "https://github.com/FFmpeg/FFmpeg.git",
+    "commit": "8dca1586f468bfcbb78ae3ed618af1361d9f140a",
+    "describe": "n8.1.3-27-g8dca1586f4",
+    "branch": "release/8.1",
+    "licence": "GPL-3.0-or-later (this configuration: --enable-gpl --enable-version3)",
+    "note": "No patches are applied to FFmpeg itself. The version string adds the build date (--extra-version=20261031)."
+  },
+  "builds": {
+    "repo": "https://github.com/FFmpeg-Builds/FFmpeg-Builds.git",
+    "commit": "5031c6f1082414e53688d39e521849905071070d",
+    "target": "win64",
+    "variant": "gpl-shared",
+    "addins": [
+      "8.1"
+    ],
+    "licence": "MIT",
+    "note": "The scripts that controlled compilation: build.sh, generate.sh, download.sh, util/, scripts.d/, patches/, variants/, addins/ and images/ (the toolchain recipe)."
+  },
+  "ci_download_cache": {
+    "run": 41199749965,
+    "artifact": 13042311561,
+    "name": "download-cache",
+    "size": 2240577198,
+    "sha256": "3de9f854a07aef24a0029b206e9ef43d674cbd957249575342e9a728d59c2c4d",
+    "note": "The build's own copy of every dependency stage's source as it fetched it (git trees at the pinned commits, Subversion checkouts, submodules, shaderc's DEPS, librsvg's vendored crates, the Opus model). GitHub keeps it until 2026-11-14, so the bundle built from it is kept with the release; a new pin needs its own run's cache, taken before that cache expires."
+  },
+  "dependencies": [
+    {
+      "stage": "scripts.d/10-mingw-std-threads.sh",
+      "kind": "git",
+      "repo": "https://github.com/meganz/mingw-std-threads.git",
+      "commit": "c931bac289dd431f1dd30fc4a5d1a7be36668073",
+      "licence": "BSD-2-Clause"
+    },
+    {
+      "stage": "scripts.d/10-mingw.sh",
+      "kind": "git",
+      "repo": "https://git.code.sf.net/p/mingw-w64/mingw-w64.git",
+      "commit": "7213d719fe344553aa24fef7cc7dedee4940d594",
+      "licence": "mingw-w64 runtime licences: headers mostly public domain / ZPL-2.1; CRT ZPL-2.1 plus assorted permissive; winpthreads MIT AND BSD-3-Clause"
+    },
+    {
+      "stage": "scripts.d/15-base.sh",
+      "kind": "meta",
+      "note": "none (meta stage, SCRIPT_SKIP=1)"
+    },
+    {
+      "stage": "scripts.d/20-libiconv.sh",
+      "kind": "git",
+      "repo": "git://git.git.savannah.gnu.org/libiconv.git",
+      "commit": "b5a1735e02bf43ee6e490fcf9395e8abc8d32432",
+      "licence": "LGPL-2.1-or-later (library); bundled gnulib modules under their own GPL/LGPL terms"
+    },
+    {
+      "stage": "scripts.d/20-zlib.sh",
+      "kind": "git",
+      "repo": "https://github.com/madler/zlib.git",
+      "commit": "9d314c341b2ce16e01ae44e27ec3dd2f32aa58fd",
+      "licence": "Zlib"
+    },
+    {
+      "stage": "scripts.d/25-fftw3.sh",
+      "kind": "git",
+      "repo": "https://github.com/FFTW/fftw3.git",
+      "commit": "a7b679c528330cf6258253d6dcf5ec90552e6c93",
+      "licence": "GPL-2.0-or-later"
+    },
+    {
+      "stage": "scripts.d/25-fribidi.sh",
+      "kind": "git",
+      "repo": "https://github.com/fribidi/fribidi.git",
+      "commit": "d2f3e1f4946e7cef9789e1c3ebdb4a60d4314c7f",
+      "licence": "LGPL-2.1-or-later"
+    },
+    {
+      "stage": "scripts.d/25-gmp.sh",
+      "kind": "git",
+      "repo": "https://github.com/BtbN/gmplib.git",
+      "commit": "5c3e9a9d52b697cab7b7d26a53972a3bf922d59a",
+      "licence": "LGPL-3.0-or-later OR GPL-2.0-or-later"
+    },
+    {
+      "stage": "scripts.d/25-libogg.sh",
+      "kind": "git",
+      "repo": "https://github.com/xiph/ogg.git",
+      "commit": "06a5e0262cdc28aa4ae6797627a783b5010440f0",
+      "licence": "BSD-3-Clause"
+    },
+    {
+      "stage": "scripts.d/25-libpng.sh",
+      "kind": "git",
+      "repo": "https://github.com/glennrp/libpng.git",
+      "commit": "0b0876829d77db0827a8cc2c4326f63be22b2aa1",
+      "licence": "libpng-2.0"
+    },
+    {
+      "stage": "scripts.d/25-libxml2.sh",
+      "kind": "git",
+      "repo": "https://github.com/GNOME/libxml2.git",
+      "commit": "c79c9612fcc77b06b0d16f35fd363d938bdbbf5e",
+      "licence": "MIT"
+    },
+    {
+      "stage": "scripts.d/25-openssl.sh",
+      "kind": "git",
+      "repo": "https://github.com/openssl/openssl.git",
+      "tag": "openssl-3.6.5",
+      "commit": "c8bd5a57108599ac650bbae77fcabe3109dab2e8",
+      "licence": "Apache-2.0"
+    },
+    {
+      "stage": "scripts.d/25-xz.sh",
+      "kind": "git",
+      "repo": "https://github.com/tukaani-project/xz.git",
+      "commit": "299eb5c3f597f107fd6019bf156885ac8bfaa5ea",
+      "licence": "0BSD (liblzma); some files public domain"
+    },
+    {
+      "stage": "scripts.d/45-brotli.sh",
+      "kind": "git",
+      "repo": "https://github.com/google/brotli.git",
+      "commit": "2e2bcf17ae7115d84ef6588d9a3651cc987d73e7",
+      "licence": "MIT"
+    },
+    {
+      "stage": "scripts.d/45-fonts/25-freetype.sh",
+      "kind": "git",
+      "repo": "https://gitlab.freedesktop.org/freetype/freetype.git",
+      "commit": "4ba7c3d82ab8b3cc80b869337d2c2b1913c5e415",
+      "licence": "FTL OR GPL-2.0-or-later"
+    },
+    {
+      "stage": "scripts.d/45-fonts/35-fontconfig.sh",
+      "kind": "git",
+      "repo": "https://gitlab.freedesktop.org/fontconfig/fontconfig.git",
+      "commit": "b25ffeabd15b76f86c0c6736f6df2f1b89858010",
+      "licence": "MIT-style fontconfig licence (HPND-sell-variant family)"
+    },
+    {
+      "stage": "scripts.d/45-fonts/45-harfbuzz.sh",
+      "kind": "git",
+      "repo": "https://github.com/harfbuzz/harfbuzz.git",
+      "commit": "75d8ac5d2313842550174eaab0cbaf653c8f2f77",
+      "licence": "MIT (Old-MIT)"
+    },
+    {
+      "stage": "scripts.d/45-fonts/50-freetype.sh",
+      "kind": "git",
+      "repo": "https://gitlab.freedesktop.org/freetype/freetype.git",
+      "commit": "4ba7c3d82ab8b3cc80b869337d2c2b1913c5e415",
+      "licence": "FTL OR GPL-2.0-or-later"
+    },
+    {
+      "stage": "scripts.d/45-lcms2.sh",
+      "kind": "git",
+      "repo": "https://github.com/mm2/Little-CMS.git",
+      "commit": "1112313b3784ced9297d8c0ee076aba17499827a",
+      "licence": "MIT (core). The fast_float and threaded plugins built here (-Dfastfloat=true -Dthreaded=true) are GPL-3.0-or-later"
+    },
+    {
+      "stage": "scripts.d/45-libffi.sh",
+      "kind": "git",
+      "repo": "https://github.com/libffi/libffi.git",
+      "commit": "bc553867367246d140cd156f060bd0409f57f157",
+      "licence": "MIT"
+    },
+    {
+      "stage": "scripts.d/45-libsamplerate.sh",
+      "kind": "git",
+      "repo": "https://github.com/libsndfile/libsamplerate.git",
+      "commit": "0844c208f683527c08ea8a80acc13b398aa9c8bf",
+      "licence": "BSD-2-Clause"
+    },
+    {
+      "stage": "scripts.d/45-libudfread.sh",
+      "kind": "git",
+      "repo": "https://code.videolan.org/videolan/libudfread.git",
+      "commit": "b0bc6957e7e07d5f35391f210596d9eb71cffdd9",
+      "licence": "LGPL-2.1-or-later"
+    },
+    {
+      "stage": "scripts.d/45-libunibreak.sh",
+      "kind": "git",
+      "repo": "https://github.com/adah1972/libunibreak.git",
+      "commit": "f8172fe771ef620112247cadfb876aecaa4f769e",
+      "licence": "Zlib"
+    },
+    {
+      "stage": "scripts.d/45-libvorbis.sh",
+      "kind": "git",
+      "repo": "https://github.com/xiph/vorbis.git",
+      "commit": "1b75110b5a2754ba1931d82dd83cb822b266a21d",
+      "licence": "BSD-3-Clause"
+    },
+    {
+      "stage": "scripts.d/45-opencl.sh",
+      "kind": "git",
+      "repo": "https://github.com/KhronosGroup/OpenCL-Headers.git",
+      "commit": "82f60316cc142e7b21dc1d8983b26de18858fbd9",
+      "licence": "Apache-2.0"
+    },
+    {
+      "stage": "scripts.d/45-pcre2.sh",
+      "kind": "git",
+      "repo": "https://github.com/PCRE2Project/pcre2.git",
+      "commit": "be940c4eaec0bc4117e06e8f14e56bf82089be6b",
+      "licence": "BSD-3-Clause WITH PCRE2-exception"
+    },
+    {
+      "stage": "scripts.d/45-pixman.sh",
+      "kind": "git",
+      "repo": "https://gitlab.freedesktop.org/pixman/pixman.git",
+      "commit": "e7fd44140fe6edef507d54bdbc25c09543ffc936",
+      "licence": "MIT"
+    },
+    {
+      "stage": "scripts.d/45-vmaf.sh",
+      "kind": "git",
+      "repo": "https://github.com/Netflix/vmaf.git",
+      "commit": "f712fa7564fe49b12991d83920b83573af2ae063",
+      "licence": "BSD-2-Clause-Patent"
+    },
+    {
+      "stage": "scripts.d/45-xxhash.sh",
+      "kind": "git",
+      "repo": "https://github.com/Cyan4973/xxHash.git",
+      "commit": "61fd0fece2ebafc5bd9b573050e0c046c4e48d28",
+      "licence": "BSD-2-Clause"
+    },
+    {
+      "stage": "scripts.d/47-vulkan/40-vulkan-headers.sh",
+      "kind": "git",
+      "repo": "https://github.com/KhronosGroup/Vulkan-Headers.git",
+      "tag": "v1.4.366",
+      "commit": "73814d006638aa00bd553215b054f0f02e457e22",
+      "licence": "Apache-2.0 OR MIT"
+    },
+    {
+      "stage": "scripts.d/47-vulkan/45-vulkan-loader.sh",
+      "kind": "git",
+      "repo": "https://github.com/BtbN/Vulkan-Shim-Loader.git",
+      "commit": "65b3936528cd92eb4ea3de485d03f858a3850484",
+      "licence": "MIT"
+    },
+    {
+      "stage": "scripts.d/47-vulkan/50-shaderc.sh",
+      "kind": "git",
+      "repo": "https://github.com/google/shaderc.git",
+      "commit": "2737994b552137a85545f956e303d620e6ff232c",
+      "licence": "Apache-2.0 (shaderc). Bundled: glslang is a BSD-3-Clause / MIT / Apache-2.0 mix, including a Bison-generated parser under GPL-3.0-or-later WITH Bison-exception-2.2; SPIRV-Tools Apache-2.0; SPIRV-Headers MIT"
+    },
+    {
+      "stage": "scripts.d/47-vulkan/55-spirv-cross.sh",
+      "kind": "git",
+      "repo": "https://github.com/KhronosGroup/SPIRV-Cross.git",
+      "commit": "300681bbcb8365a8d1eacdacdbdd0249bbf1d6b1",
+      "licence": "Apache-2.0 (some files MIT)"
+    },
+    {
+      "stage": "scripts.d/47-vulkan/60-spirv-headers.sh",
+      "kind": "git",
+      "repo": "https://github.com/KhronosGroup/SPIRV-Headers.git",
+      "commit": "fbf86836a9b1966586faf7be7bb8a6440e156d62",
+      "licence": "MIT (Khronos)"
+    },
+    {
+      "stage": "scripts.d/47-vulkan/99-enable.sh",
+      "kind": "meta",
+      "note": "none (meta, SCRIPT_SKIP=1)"
+    },
+    {
+      "stage": "scripts.d/50-amf.sh",
+      "kind": "git",
+      "repo": "https://github.com/GPUOpen-LibrariesAndSDKs/AMF.git",
+      "commit": "57ee0cfb0e1a08d9041f77435653794c1b012be0",
+      "licence": "MIT (headers; LICENSE.txt adds a codec-royalty / standards notice)"
+    },
+    {
+      "stage": "scripts.d/50-aom.sh",
+      "kind": "git",
+      "repo": "https://aomedia.googlesource.com/aom",
+      "commit": "9ace39e02a34992b83fc7f7f2bfbbd2e79348c74",
+      "licence": "BSD-2-Clause + AOMedia Patent License 1.0"
+    },
+    {
+      "stage": "scripts.d/50-avisynth.sh",
+      "kind": "git",
+      "repo": "https://github.com/AviSynth/AviSynthPlus.git",
+      "commit": "523370a39933e2f9c208a5d74c1d35d43d177a76",
+      "licence": "GPL-2.0-or-later with the AviSynth linking exception"
+    },
+    {
+      "stage": "scripts.d/50-chromaprint.sh",
+      "kind": "git",
+      "repo": "https://github.com/acoustid/chromaprint.git",
+      "commit": "3b38c100022bdfb49be7797c4828a476f1621d55",
+      "licence": "MIT (Chromaprint's own code). Bundled kissfft is BSD-3-Clause; some FFmpeg-derived files are LGPL-2.1-or-later"
+    },
+    {
+      "stage": "scripts.d/50-dav1d.sh",
+      "kind": "git",
+      "repo": "https://code.videolan.org/videolan/dav1d.git",
+      "commit": "b8b2d726b4b78a2fb174cb45baff441b5969672c",
+      "licence": "BSD-2-Clause"
+    },
+    {
+      "stage": "scripts.d/50-davs2.sh",
+      "kind": "git",
+      "repo": "https://github.com/pkuvcl/davs2.git",
+      "commit": "b41cf117452e2d73d827f02d3e30aa20f1c721ac",
+      "licence": "GPL-2.0-or-later"
+    },
+    {
+      "stage": "scripts.d/50-dvd/30-libdvdcss.sh",
+      "kind": "git",
+      "repo": "https://code.videolan.org/videolan/libdvdcss.git",
+      "commit": "811ce97a1d4d1c9d936f4b2707f533a9ef768251",
+      "licence": "GPL-2.0-or-later"
+    },
+    {
+      "stage": "scripts.d/50-dvd/40-libdvdread.sh",
+      "kind": "git",
+      "repo": "https://code.videolan.org/videolan/libdvdread.git",
+      "commit": "0f30df53125b564ef45903714403ce0a1e6c5e9e",
+      "licence": "GPL-2.0-or-later"
+    },
+    {
+      "stage": "scripts.d/50-dvd/50-libdvdnav.sh",
+      "kind": "git",
+      "repo": "https://code.videolan.org/videolan/libdvdnav.git",
+      "commit": "8147ccd35e5aae4afdd21171cf7b6b4d8f179d28",
+      "licence": "GPL-2.0-or-later"
+    },
+    {
+      "stage": "scripts.d/50-ffnvcodec.sh",
+      "kind": "git",
+      "repo": "https://github.com/FFmpeg/nv-codec-headers.git",
+      "commit": "ced4f8eba3ba5dd431932cba17928f0dffdaeb2b",
+      "licence": "MIT"
+    },
+    {
+      "stage": "scripts.d/50-frei0r.sh",
+      "kind": "git",
+      "repo": "https://github.com/dyne/frei0r.git",
+      "commit": "618dde79716fab4e428a05e6476325b9e6f5b063",
+      "licence": "GPL-2.0-or-later"
+    },
+    {
+      "stage": "scripts.d/50-gme.sh",
+      "kind": "git",
+      "repo": "https://github.com/libgme/game-music-emu.git",
+      "commit": "f68963b1de0633149b05732113d3c3113c6f63a1",
+      "licence": "LGPL-2.1-or-later"
+    },
+    {
+      "stage": "scripts.d/50-kvazaar.sh",
+      "kind": "git",
+      "repo": "https://github.com/ultravideo/kvazaar.git",
+      "commit": "1f11f9ae33ef0cbe48a7d335b7144af1ecfe8092",
+      "licence": "BSD-3-Clause"
+    },
+    {
+      "stage": "scripts.d/50-lcevcdec.sh",
+      "kind": "git",
+      "repo": "https://github.com/v-novaltd/LCEVCdec.git",
+      "commit": "741fb7c869cf61012f7dcebfcd9e56981198c78b",
+      "licence": "BSD-3-Clause-Clear (V-Nova, with additional terms; no patent licence)"
+    },
+    {
+      "stage": "scripts.d/50-libaribb24.sh",
+      "kind": "git",
+      "repo": "https://github.com/nkoriyama/aribb24.git",
+      "commit": "5e9be272f96e00f15a2f3c5f8ba7e124862aec38",
+      "licence": "LGPL-3.0-or-later"
+    },
+    {
+      "stage": "scripts.d/50-libaribcaption.sh",
+      "kind": "git",
+      "repo": "https://github.com/xqq/libaribcaption.git",
+      "commit": "37dde0f32652c32aa98bf92278944d1cfb2e7354",
+      "licence": "MIT"
+    },
+    {
+      "stage": "scripts.d/50-libass.sh",
+      "kind": "git",
+      "repo": "https://github.com/libass/libass.git",
+      "commit": "f61db567e6593df3470e91594bcd4ad2d0473aff",
+      "licence": "ISC"
+    },
+    {
+      "stage": "scripts.d/50-libbluray.sh",
+      "kind": "git",
+      "repo": "https://code.videolan.org/videolan/libbluray.git",
+      "commit": "f33a738fd7bb8b5e1148b0a5424778db7342450b",
+      "licence": "LGPL-2.1-or-later"
+    },
+    {
+      "stage": "scripts.d/50-libjxl/50-libjxl.sh",
+      "kind": "git",
+      "repo": "https://github.com/libjxl/libjxl.git",
+      "commit": "e47d2a2b5bb418f2947ce07f36cb048861db3820",
+      "licence": "BSD-3-Clause"
+    },
+    {
+      "stage": "scripts.d/50-libmp3lame.sh",
+      "kind": "svn",
+      "repo": "https://svn.code.sf.net/p/lame/svn/trunk/lame",
+      "revision": 7113,
+      "licence": "LGPL-2.0-or-later"
+    },
+    {
+      "stage": "scripts.d/50-libopus.sh",
+      "kind": "git",
+      "repo": "https://github.com/xiph/opus.git",
+      "commit": "a8b2545eec71e0f53ecead2d583e7b6baa42684d",
+      "licence": "BSD-3-Clause"
+    },
+    {
+      "stage": "scripts.d/50-libplacebo.sh",
+      "kind": "git",
+      "repo": "https://code.videolan.org/videolan/libplacebo.git",
+      "commit": "275f7dea27924cdd34ab2e6c20e448b6bc4fab65",
+      "licence": "LGPL-2.1-or-later"
+    },
+    {
+      "stage": "scripts.d/50-librist/40-mbedtls.sh",
+      "kind": "git",
+      "repo": "https://github.com/ARMmbed/mbedtls.git",
+      "tag": "v4.2.0",
+      "commit": "ece41aa84d7879d7e55c59e955a5884b541f7f3b",
+      "licence": "Apache-2.0 OR GPL-2.0-or-later"
+    },
+    {
+      "stage": "scripts.d/50-librist/50-librist.sh",
+      "kind": "git",
+      "repo": "https://code.videolan.org/rist/librist.git",
+      "commit": "47ad5513d1aa0adb692d78f635512e7fa123f06e",
+      "licence": "BSD-2-Clause"
+    },
+    {
+      "stage": "scripts.d/50-librsvg/10-glib.sh",
+      "kind": "git",
+      "repo": "https://github.com/GNOME/glib.git",
+      "commit": "50b938a3e8f5154a25b5af3dd8b9dd8b2ccba7c3",
+      "licence": "LGPL-2.1-or-later"
+    },
+    {
+      "stage": "scripts.d/50-librsvg/20-cairo.sh",
+      "kind": "git",
+      "repo": "https://gitlab.freedesktop.org/cairo/cairo.git",
+      "commit": "74755964edef651691d5cd36ff140108298e4e6e",
+      "licence": "LGPL-2.1-only OR MPL-1.1"
+    },
+    {
+      "stage": "scripts.d/50-librsvg/30-pango.sh",
+      "kind": "git",
+      "repo": "https://github.com/GNOME/pango.git",
+      "commit": "68e981d243d50e03f3df12fb400f31647ef570d2",
+      "licence": "LGPL-2.0-or-later"
+    },
+    {
+      "stage": "scripts.d/50-librsvg/99-librsvg.sh",
+      "kind": "git+cargo",
+      "repo": "https://github.com/GNOME/librsvg.git",
+      "commit": "0c074d0a25adefd65843067306f9bc1fb609f68f",
+      "licence": "LGPL-2.1-or-later; vendored Rust crates under their own licences (mostly MIT OR Apache-2.0)"
+    },
+    {
+      "stage": "scripts.d/50-libssh.sh",
+      "kind": "git",
+      "repo": "https://gitlab.com/libssh/libssh-mirror.git",
+      "commit": "9de02f3d01ba16d06f46c0c4d27aa08d8deeecee",
+      "licence": "LGPL-2.1-or-later"
+    },
+    {
+      "stage": "scripts.d/50-libtheora.sh",
+      "kind": "git",
+      "repo": "https://github.com/xiph/theora.git",
+      "commit": "28fd5ec77f0ad0e07a371cef1047828116f6bd8a",
+      "licence": "BSD-3-Clause"
+    },
+    {
+      "stage": "scripts.d/50-libvpx.sh",
+      "kind": "git",
+      "repo": "https://chromium.googlesource.com/webm/libvpx",
+      "commit": "900b2a52b69e9d4ab72eb855c365da1100c50eb1",
+      "licence": "BSD-3-Clause (+ WebM patent grant)"
+    },
+    {
+      "stage": "scripts.d/50-libwebp.sh",
+      "kind": "git",
+      "repo": "https://chromium.googlesource.com/webm/libwebp",
+      "commit": "1844042d1ca751e62e61df7617dba19c98588339",
+      "licence": "BSD-3-Clause"
+    },
+    {
+      "stage": "scripts.d/50-libzmq.sh",
+      "kind": "git",
+      "repo": "https://github.com/zeromq/libzmq.git",
+      "commit": "46493370217ac135246617fa2f6ac819d8b61bfc",
+      "licence": "MPL-2.0"
+    },
+    {
+      "stage": "scripts.d/50-lilv/96-lv2.sh",
+      "kind": "git",
+      "repo": "https://github.com/lv2/lv2.git",
+      "commit": "3c57dae600a5ad8d05acd53ee3490f7d91cb7be6",
+      "licence": "ISC"
+    },
+    {
+      "stage": "scripts.d/50-lilv/96-serd.sh",
+      "kind": "git",
+      "repo": "https://github.com/drobilla/serd.git",
+      "commit": "b621b0bc790d1e8102d3138ead16b974ddda8432",
+      "licence": "ISC"
+    },
+    {
+      "stage": "scripts.d/50-lilv/96-zix.sh",
+      "kind": "git",
+      "repo": "https://github.com/drobilla/zix.git",
+      "commit": "17d632393f5addb6fa24dda2927b96515407cca7",
+      "licence": "ISC"
+    },
+    {
+      "stage": "scripts.d/50-lilv/97-sord.sh",
+      "kind": "git",
+      "repo": "https://github.com/drobilla/sord.git",
+      "commit": "4b5232bb91e7f2f1b84df384494d073fabbcd312",
+      "licence": "ISC"
+    },
+    {
+      "stage": "scripts.d/50-lilv/98-sratom.sh",
+      "kind": "git",
+      "repo": "https://github.com/lv2/sratom.git",
+      "commit": "9e8ee84eed502e6030ce8bb49694fd28542b08fc",
+      "licence": "ISC"
+    },
+    {
+      "stage": "scripts.d/50-lilv/99-lilv.sh",
+      "kind": "git",
+      "repo": "https://github.com/lv2/lilv.git",
+      "commit": "4b8f30055fa5cb4134a2eb45fc1555bc04289314",
+      "licence": "ISC"
+    },
+    {
+      "stage": "scripts.d/50-onevpl.sh",
+      "kind": "git",
+      "repo": "https://github.com/intel/libvpl.git",
+      "commit": "674d015bcb294bc39fa276e99a652ea045423e82",
+      "licence": "MIT"
+    },
+    {
+      "stage": "scripts.d/50-openal.sh",
+      "kind": "git",
+      "repo": "https://github.com/kcat/openal-soft.git",
+      "commit": "4a52288b772d1722713675f71bb30f321e78fd80",
+      "licence": "LGPL-2.0-or-later (COPYING is the GNU Library GPL v2)"
+    },
+    {
+      "stage": "scripts.d/50-openapv.sh",
+      "kind": "git",
+      "repo": "https://github.com/AcademySoftwareFoundation/openapv.git",
+      "commit": "b4ff69856b4c3e8849df431ee3db54fd535f9bf3",
+      "licence": "BSD-3-Clause"
+    },
+    {
+      "stage": "scripts.d/50-opencore-amr.sh",
+      "kind": "git",
+      "repo": "https://git.code.sf.net/p/opencore-amr/code",
+      "commit": "7dba8c32238418ce0b316a852b2224df586ca896",
+      "licence": "Apache-2.0"
+    },
+    {
+      "stage": "scripts.d/50-openh264.sh",
+      "kind": "git",
+      "repo": "https://github.com/cisco/openh264.git",
+      "commit": "1bca62311e447fd9c39fc93de2c4b96cd5ce971c",
+      "licence": "BSD-2-Clause"
+    },
+    {
+      "stage": "scripts.d/50-openjpeg.sh",
+      "kind": "git",
+      "repo": "https://github.com/uclouvain/openjpeg.git",
+      "commit": "8314119b067c0fc77834731168daaebd379fdb12",
+      "licence": "BSD-2-Clause"
+    },
+    {
+      "stage": "scripts.d/50-openmpt.sh",
+      "kind": "git",
+      "repo": "https://github.com/OpenMPT/openmpt.git",
+      "commit": "3ee3c8000b45886703816fd027369ab6ad6fc6cb",
+      "licence": "BSD-3-Clause (bundled minimp3 is CC0-1.0)"
+    },
+    {
+      "stage": "scripts.d/50-rav1e.sh",
+      "kind": "git+cargo",
+      "repo": "https://github.com/xiph/rav1e.git",
+      "commit": "31435de9d76fddd38f6dcc31d4014574cebb2092",
+      "licence": "BSD-2-Clause + AOMedia Patent License 1.0; crates mixed (mostly MIT OR Apache-2.0)"
+    },
+    {
+      "stage": "scripts.d/50-rubberband.sh",
+      "kind": "git",
+      "repo": "https://github.com/breakfastquay/rubberband.git",
+      "commit": "e4296ac80b1170018a110bc326fd0d45a0eb27d6",
+      "licence": "GPL-2.0-or-later"
+    },
+    {
+      "stage": "scripts.d/50-schannel.sh",
+      "kind": "meta",
+      "note": "none (Windows Schannel system API; SCRIPT_SKIP=1)"
+    },
+    {
+      "stage": "scripts.d/50-sdl.sh",
+      "kind": "git",
+      "repo": "https://github.com/libsdl-org/SDL.git",
+      "commit": "8acf7cfc0f88717e5c036f60f0314bfcafe39189",
+      "licence": "Zlib"
+    },
+    {
+      "stage": "scripts.d/50-snappy.sh",
+      "kind": "git",
+      "repo": "https://github.com/google/snappy.git",
+      "commit": "946606459314e55d029c85f9a8c46f8809467f0f",
+      "licence": "BSD-3-Clause"
+    },
+    {
+      "stage": "scripts.d/50-soxr.sh",
+      "kind": "git",
+      "repo": "https://git.code.sf.net/p/soxr/code",
+      "commit": "945b592b70470e29f917f4de89b4281fbbd540c0",
+      "licence": "LGPL-2.1-or-later"
+    },
+    {
+      "stage": "scripts.d/50-srt.sh",
+      "kind": "git",
+      "repo": "https://github.com/Haivision/srt.git",
+      "commit": "9f2390232a8256ed4c72a5418c2b2777c49ad737",
+      "licence": "MPL-2.0"
+    },
+    {
+      "stage": "scripts.d/50-svtav1.sh",
+      "kind": "git",
+      "repo": "https://gitlab.com/AOMediaCodec/SVT-AV1.git",
+      "commit": "f2c3fb78611d542b12b11c6d10d3744b31b754a0",
+      "licence": "BSD-3-Clause-Clear + AOMedia Patent License 1.0"
+    },
+    {
+      "stage": "scripts.d/50-twolame.sh",
+      "kind": "git",
+      "repo": "https://github.com/njh/twolame.git",
+      "commit": "6fced852d4d5cfad58cf9dbe3ea619b08e87d398",
+      "licence": "LGPL-2.1-or-later"
+    },
+    {
+      "stage": "scripts.d/50-uavs3d.sh",
+      "kind": "git",
+      "repo": "https://github.com/uavs3/uavs3d.git",
+      "commit": "0e20d2c291853f196c68922a264bcd8471d75b68",
+      "licence": "BSD-style licence in COPYING (GitHub reports NOASSERTION; the exact clause count was not verified)"
+    },
+    {
+      "stage": "scripts.d/50-vaapi/50-libva.sh",
+      "kind": "git",
+      "repo": "https://github.com/intel/libva.git",
+      "commit": "f052e984e0c8bf10784198cc311b23c567b1367f",
+      "licence": "MIT"
+    },
+    {
+      "stage": "scripts.d/50-vaapi/99-finalize.sh",
+      "kind": "meta",
+      "note": "none (meta, SCRIPT_SKIP=1)"
+    },
+    {
+      "stage": "scripts.d/50-vapoursynth.sh",
+      "kind": "git",
+      "repo": "https://github.com/vapoursynth/vapoursynth.git",
+      "tag": "R81",
+      "commit": "dd11a9da6f8e2bb24ab4bb084d44bf01fb93612a",
+      "licence": "LGPL-2.1-or-later"
+    },
+    {
+      "stage": "scripts.d/50-vidstab.sh",
+      "kind": "git",
+      "repo": "https://github.com/georgmartius/vid.stab.git",
+      "commit": "e2445c4081658318223762a696eb1c645c2d7168",
+      "licence": "LGPL-2.1-or-later (relicensed from GPL-2.0-or-later in commit e4fef65, 2026-08-06, which predates this pin)"
+    },
+    {
+      "stage": "scripts.d/50-vvenc.sh",
+      "kind": "git",
+      "repo": "https://github.com/fraunhoferhhi/vvenc.git",
+      "commit": "0e7508b811bbea3cd510956ddb3193f3a4c93684",
+      "licence": "BSD-3-Clause-Clear"
+    },
+    {
+      "stage": "scripts.d/50-x264.sh",
+      "kind": "git",
+      "repo": "https://code.videolan.org/videolan/x264.git",
+      "commit": "0480cb05fa188d37ae87e8f4fd8f1aea3711f7ee",
+      "licence": "GPL-2.0-or-later"
+    },
+    {
+      "stage": "scripts.d/50-x265.sh",
+      "kind": "git",
+      "repo": "https://github.com/Multicorewareinc/x265.git",
+      "commit": "5143a2a00ad0cc600831654a248b96ec7307eb4a",
+      "licence": "GPL-2.0-or-later"
+    },
+    {
+      "stage": "scripts.d/50-xavs2.sh",
+      "kind": "git",
+      "repo": "https://github.com/pkuvcl/xavs2.git",
+      "commit": "eae1e8b9d12468059bdd7dee893508e470fa83d8",
+      "licence": "GPL-2.0-or-later"
+    },
+    {
+      "stage": "scripts.d/50-xvid.sh",
+      "kind": "svn",
+      "repo": "https://svn.xvid.org/trunk/xvidcore",
+      "revision": 2204,
+      "licence": "GPL-2.0-or-later"
+    },
+    {
+      "stage": "scripts.d/50-zimg.sh",
+      "kind": "git",
+      "repo": "https://github.com/sekrit-twc/zimg.git",
+      "commit": "67e0603271c080e22c8429856dd4a8a56587e61e",
+      "licence": "WTFPL"
+    },
+    {
+      "stage": "scripts.d/50-zvbi.sh",
+      "kind": "git",
+      "repo": "https://github.com/zapping-vbi/zvbi",
+      "commit": "34bb6f660c5c1bacd4a66cc7b22311e4ca3c1ab5",
+      "licence": "Mixed: project GPL-2.0-or-later; most of libzvbi LGPL-2.0-or-later; src/packet-830.c and src/pdc.c GPL-2.0-only (per COPYING.md)"
+    },
+    {
+      "stage": "scripts.d/55-rustdedup.sh",
+      "kind": "meta",
+      "note": "none (FFmpeg-Builds post-processing script, SCRIPT_SKIP=1)"
+    },
+    {
+      "stage": "scripts.d/zz-final.sh",
+      "kind": "meta",
+      "note": "none (meta entry point, SCRIPT_SKIP=1)"
+    }
+  ],
+  "fetched_during_the_build": [
+    {
+      "what": "FreeType's dlg submodule (only compiled with FT_DEBUG_LOGGING)",
+      "repo": "https://github.com/nyorain/dlg.git",
+      "commit": "395ccad2c1e0daae535c4d20bb0a3f2424648e17",
+      "licence": "MIT"
+    },
+    {
+      "what": "rav1e's Rust crates, from its Cargo.lock at the pinned commit",
+      "cargo_lock": "https://raw.githubusercontent.com/xiph/rav1e/31435de9d76fddd38f6dcc31d4014574cebb2092/Cargo.lock",
+      "note": "The build ran 'cargo update cc' first, so its cc crate (a build-time helper, not linked) may be newer than the lockfile's."
+    }
+  ],
+  "toolchain": [
+    {
+      "what": "GCC 16.2.0 (libgcc, libstdc++ and libgomp are linked statically)",
+      "url": "https://ftp.gnu.org/gnu/gcc/gcc-16.2.0/gcc-16.2.0.tar.xz",
+      "sha512": "c51c30ca7422d0cbecf504b2e0f33c3aca31e0f90a76b65217f465163fa6fa17b3f5de39e145c47e5bab90ac0ce7fff3b03c8d553ae36e01faaea5a50f8648d1",
+      "licence": "GPL-3.0-or-later; runtime libraries GPL-3.0-or-later WITH GCC-exception-3.1"
+    },
+    {
+      "what": "mingw-w64 v14.0.0, which GCC's runtime libraries were built against",
+      "url": "https://downloads.sourceforge.net/project/mingw-w64/mingw-w64/mingw-w64-release/mingw-w64-v14.0.0.tar.bz2",
+      "sha512": "17378a0e2abbbb688468a78cb0ba261f9001a1bc6e7d0270c24c4b8b13e5c6513e8fb8e617d08102fbc772c288ad81ec3a43ca756ed28f17cc5543f717a8bb6d",
+      "licence": "ZPL-2.1, public domain, MIT and BSD-3-Clause parts"
+    },
+    {
+      "what": "crosstool-NG, with the patches it applied to GCC, binutils and mingw-w64",
+      "repo": "https://github.com/crosstool-ng/crosstool-ng.git",
+      "commit": "b1a94f65c5187d99037a4e2f57aefbdf995a9677",
+      "licence": "GPL-2.0-or-later"
+    },
+    {
+      "what": "The Rust standard library of rustc 1.99.1 (linked into avcodec through rav1e and librsvg)",
+      "url": "https://static.rust-lang.org/dist/rust-src-1.99.1.tar.xz",
+      "sha256_url": "https://static.rust-lang.org/dist/rust-src-1.99.1.tar.xz.sha256",
+      "licence": "MIT OR Apache-2.0"
+    }
+  ],
+  "known_problems": [
+    "LICENCE CONFLICT: this build links libzvbi, whose src/packet-830.c and src/pdc.c are GPL-2.0-only, into avcodec-62.dll, a GPL-3.0-or-later build. A source bundle does not cure that. Upstream confirmed it (FFmpeg-Builds issue 694) and stopped building zvbi into GPL builds in commit 162691525a439dbec17f5d01a8d241f134b7516d on 2026-11-07. Pin a build made after that commit before publishing.",
+    "The Docker images the build ran in were deleted from the registry, so a bit-for-bit rebuild is not possible; the same scripts with fresh images rebuild it.",
+    "rav1e's crates were fetched during the image build after 'cargo update cc'; the cc version used (build-time only) is not recorded."
+  ]
+}

@@ -95,9 +95,36 @@ other queued URLs continue when possible.
 
 ### Python Whisper and PyTorch
 
-Choose a healthy Python runtime that can import the packaged Media Manglers
+With Media Manglers' own Python, Whisper and PyTorch rows that say speech
+recognition is not set up need the first-launch setup: choose **Set up** on the
+**Speech recognition** row (see
+[First launch](DEPENDENCIES_SETUP.md#first-launch-setting-up-speech-recognition)).
+With a Python of yours, choose one that can import the packaged Media Manglers
 module, Whisper, and PyTorch. The readiness detail explains which component is
 missing.
+
+### Speech recognition setup stopped
+
+The setup keeps nothing half done: the speech libraries get their final folder
+only when every file is in, checked and compiled. If it stops, read the message
+on the bar at the top of the window, fix what it names, and choose **Set up**
+again; files already downloaded and checked are reused.
+
+- "Windows did not trust the certificate": Windows checked the connection and
+  refused it, so nothing was downloaded. Check the PC's date and time and the
+  network connection (a proxy or a filtering service can cause it), then try
+  again. Media Manglers never turns the check off.
+- "could not be downloaded": the network or the server failed. Try again later.
+- "did not match its published checksum": the file that arrived was not the
+  pinned one. It was removed; try again.
+- "would need paths of … characters": your user folder's path is too long for
+  Windows on this PC. Nothing was set up.
+- "the disk … is full": free some space (the setup needs about 1.1 GB free: the
+  downloads and the unpacked libraries), then choose **Set up** again.
+
+If the **Speech recognition** row says the speech libraries "no longer load"
+(for example after a security program removed part of them), choose **Set up**:
+it downloads them again and replaces the copy in your user folder.
 
 ### Whisper model downloads
 

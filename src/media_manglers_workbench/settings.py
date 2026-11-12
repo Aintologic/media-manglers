@@ -267,6 +267,9 @@ def build_default_settings(repo_root: str = "") -> dict[str, Any]:
             # Installer plan, Stage 1: the one-time question about tool paths saved by an earlier version
             # that differ from the copies bundled with Media Manglers has been answered.
             "bundled_tools_question_answered": False,
+            # Installer plan, Stage 4: the operator chose Not now at the first-launch question, so it is not asked
+            # again at start-up; the Speech recognition row's Set up asks it whenever chosen.
+            "speech_setup_declined": False,
             "whisper_model_download_approved": False,
             "review_inbox_order": "oldest",
             "review_inbox_max_files": 3,

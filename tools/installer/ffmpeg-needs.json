@@ -1,0 +1,57 @@
+{
+  "purpose": "What the shipped app asks of FFmpeg. The build checks the bundled FFmpeg against this list (packaged_runtime.py ffmpeg-check) and stops when a required entry is missing; an optional one (NVIDIA only, AV1 recordings) is only reported. Audio Mangler.ps1 is not shipped and is not counted.",
+  "encoders": [
+    {"name": "libx264", "why": "the proxy, clips, review videos and every AI Video Editor render; the fallback whenever NVENC fails"},
+    {"name": "aac", "why": "the sound of the proxy, clips, review videos and editor renders"},
+    {"name": "libmp3lame", "why": "Full Review's audio.mp3 and the evidence audio snippets"},
+    {"name": "pcm_s16le", "why": "the 16 kHz WAV every transcription starts from, and the raw sound piped to the levels"},
+    {"name": "pcm_f32le", "why": "the editor's scene and joined sound before the one AAC encode"},
+    {"name": "flac", "why": "Find my bug reports' narration FLAC"},
+    {"name": "mjpeg", "why": "every .jpg still, contact sheet and thumbnail"},
+    {"name": "png", "why": "privacy masks"},
+    {"name": "rawvideo", "why": "the game-picture sampler's gray keyframes and gray tiles"},
+    {"name": "h264_nvenc", "required": false, "why": "NVIDIA PCs only; every use falls back to libx264"}
+  ],
+  "decoders": [
+    {"name": "h264", "why": "H.264 recordings and the editor's own scenes"},
+    {"name": "hevc", "why": "HEVC recordings (OBS with NVENC)"},
+    {"name": "aac", "why": "recording sound tracks"},
+    {"name": "mp3", "why": "MP3 sound read by Whisper"},
+    {"name": "flac", "why": "the narration FLAC read by Whisper"},
+    {"name": "pcm_s16le", "why": "the app's own WAVs"},
+    {"name": "pcm_f32le", "why": "the editor's float WAVs"},
+    {"name": "mjpeg", "why": "stills read back for contact sheets and tiles"},
+    {"name": "png", "why": "privacy masks read back"},
+    {"name": "libdav1d", "required": false, "why": "AV1 recordings only"}
+  ],
+  "filters": [
+    {"name": "scale"}, {"name": "fps"}, {"name": "select"}, {"name": "setpts"}, {"name": "split"},
+    {"name": "crop"}, {"name": "null"}, {"name": "tile"}, {"name": "tpad"}, {"name": "trim"},
+    {"name": "showinfo"}, {"name": "drawtext", "why": "editor titles, still time stamps and contact-sheet labels"},
+    {"name": "drawbox"}, {"name": "overlay"}, {"name": "gblur"}, {"name": "alphamerge"}, {"name": "format"},
+    {"name": "setsar"}, {"name": "pad"}, {"name": "xfade"}, {"name": "concat"}, {"name": "fade"},
+    {"name": "metadata"}, {"name": "blackdetect"}, {"name": "freezedetect"}, {"name": "color"},
+    {"name": "aresample"}, {"name": "aformat"}, {"name": "volume"}, {"name": "asplit"},
+    {"name": "sidechaincompress"}, {"name": "amix"}, {"name": "amerge"}, {"name": "apad"}, {"name": "atrim"},
+    {"name": "asetpts"}, {"name": "alimiter"}, {"name": "afade"}, {"name": "acrossfade"}, {"name": "loudnorm"},
+    {"name": "ebur128"}, {"name": "silencedetect"},
+    {"name": "scale_cuda", "required": false, "why": "NVIDIA PCs only; the next attempt uses scale"}
+  ],
+  "muxers": [
+    {"name": "mp4"}, {"name": "matroska"}, {"name": "wav"}, {"name": "mp3"}, {"name": "flac"},
+    {"name": "image2"}, {"name": "null"}, {"name": "rawvideo"}, {"name": "s16le"}
+  ],
+  "demuxers": [
+    {"name": "mov"}, {"name": "matroska"}, {"name": "wav"}, {"name": "flac"}, {"name": "image2"},
+    {"name": "mp3", "required": false, "why": "only when Whisper reads an MP3"}
+  ],
+  "devices": [
+    {"name": "lavfi", "why": "the NVENC test source and the privacy mask canvas"}
+  ],
+  "configuration": [
+    {"name": "--enable-gpl"}, {"name": "--enable-version3"}, {"name": "--enable-libx264"},
+    {"name": "--enable-libmp3lame"}, {"name": "--enable-libfreetype", "why": "drawtext"},
+    {"name": "--enable-libharfbuzz", "required": false}, {"name": "--enable-fontconfig", "required": false},
+    {"name": "--enable-ffnvcodec", "required": false}, {"name": "--enable-libdav1d", "required": false}
+  ]
+}

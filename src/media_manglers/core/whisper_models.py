@@ -28,10 +28,10 @@ import time
 from typing import Any, Callable
 from urllib.parse import urlparse
 
-from . import safe_write
+from . import downloads, safe_write
 
 VALID, MISSING, DAMAGED, UNKNOWN = "valid", "missing", "damaged", "unknown"
-PARTIAL_SUFFIX = ".mm-partial"
+PARTIAL_SUFFIX = downloads.PARTIAL_SUFFIX
 
 
 class ModelNotApproved(Exception):
@@ -165,53 +165,22 @@ def checked_model_file(name: str, *, table: dict[str, str] | None = None) -> Pat
 # The approved download ------------------------------------------------------------------------------------------
 
 
-def _open(url: str, timeout: float) -> Any:
-    import ssl  # noqa: PLC0415
-    import urllib.request  # noqa: PLC0415
-
-    return urllib.request.urlopen(url, timeout=timeout, context=ssl.create_default_context())  # noqa: S310
-
-
 def download_model(name: str, *, table: dict[str, str] | None = None, root: str | os.PathLike[str] | None = None,
-                   opener: Callable[[str, float], Any] = _open,
+                   opener: Callable[[str, float], Any] = downloads.open_url,
                    progress: Callable[[int, int], None] | None = None) -> ModelState:
     """Download the approved model ``name`` into the Whisper cache, unless a valid copy is already there.
 
-    Written to a partial file beside its final name, checked against the published SHA-256, and only then put in
-    place (``safe_write.place_checked``, Stage 2's rules); a damaged copy is replaced only here, after approval."""
+    Through the one shared downloader (Stage 4): written to a partial file beside its final name, checked against
+    the published SHA-256, and only then put in place (``safe_write.place_checked``, Stage 2's rules), over a
+    connection whose certificate Windows checked. A damaged copy is replaced only here, after approval."""
 
     found = model_state(name, table=table, root=root)
     if found.state == UNKNOWN:
         raise ValueError(not_approved_message(name, UNKNOWN))
     if found.valid:
         return found
-    target = Path(found.path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    partial = target.with_name(target.name + PARTIAL_SUFFIX)
-    budget = safe_write.StepBudget()
-    if os.path.lexists(partial):
-        safe_write.remove(partial, budget=budget)  # what an interrupted download left is never reused
-    try:
-        with opener(found.url, 60.0) as response, open(partial, "wb") as handle:
-            total = int(getattr(response, "headers", {}).get("Content-Length") or 0)
-            done = 0
-            while True:
-                chunk = response.read(1024 * 1024)
-                if not chunk:
-                    break
-                handle.write(chunk)
-                done += len(chunk)
-                if progress is not None:
-                    progress(done, total)
-            handle.flush()
-            os.fsync(handle.fileno())
-    except BaseException:
-        try:
-            partial.unlink(missing_ok=True)
-        except OSError:
-            pass
-        raise
-    safe_write.place_checked(partial, target, found.sha256, replace=found.state == DAMAGED, budget=safe_write.StepBudget())
+    downloads.download_file(found.url, found.path, found.sha256, replace=found.state == DAMAGED,
+                            name=f"The Whisper model {name}", opener=opener, progress=progress)
     return model_state(name, table=table, root=root)
 
 
