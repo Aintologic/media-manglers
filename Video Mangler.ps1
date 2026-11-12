@@ -166,6 +166,15 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# Installer plan, Stage 2: every Media Manglers entry point holds this lock while it runs, so the installer can see
+# Media Manglers is running and ask for it to be closed (src\media_manglers\core\app_locks.py). It never stops
+# anything from starting, and Windows lets go of it when this PowerShell ends.
+$script:MediaManglersRunningLock = $null
+try {
+    $script:MediaManglersRunningLock = New-Object System.Threading.Mutex($false, "MediaManglers.Running")
+}
+catch {
+}
 $script:CurrentLogFile = $null
 $script:MMRunControlPath = $RunControlPath
 $script:MMRunControlCache = $null
@@ -1851,33 +1860,68 @@ function Invoke-PhaseAction {
     }
 }
 
-# 188: where each outside tool comes from, and its own install folders. The Workbench has the same
+# 188: where each tool comes from, and its own install folders. The Workbench has the same
 # table (src\media_manglers_workbench\tool_sources.py); tests\test_tool_sources.py keeps them equal.
-# Every tool is looked for in the same order: the path given, then PATH, then these folders.
-# Nothing here downloads or installs anything.
+# Every tool is looked for in the same order: the path given, then (FFprobe) beside the FFmpeg in use,
+# then Media Manglers' own copy (Bundled, below the runtime folder beside this script; installer plan
+# Stage 1), then PATH, then these folders. Nothing here downloads or installs anything.
 function Get-ToolSource {
     param([Parameter(Mandatory)] [string]$Key)
 
     $sources = @{
-        ffmpeg  = @{ Name = "FFmpeg"; Page = "https://ffmpeg.org/download.html"; WingetId = "Gyan.FFmpeg"; Standard = @(
+        ffmpeg  = @{ Name = "FFmpeg"; Page = "https://ffmpeg.org/download.html"; WingetId = "Gyan.FFmpeg"; Bundled = "ffmpeg\bin\ffmpeg.exe"; Standard = @(
                 @("LOCALAPPDATA", "Microsoft\WinGet\Links\ffmpeg.exe"),
                 @("ProgramFiles", "WinGet\Links\ffmpeg.exe"),
                 @("LOCALAPPDATA", "Microsoft\WinGet\Packages\Gyan.FFmpeg_*\ffmpeg-*\bin\ffmpeg.exe")) }
-        ffprobe = @{ Name = "FFprobe"; Page = "https://ffmpeg.org/download.html"; WingetId = "Gyan.FFmpeg"; Standard = @(
+        ffprobe = @{ Name = "FFprobe"; Page = "https://ffmpeg.org/download.html"; WingetId = "Gyan.FFmpeg"; Bundled = "ffmpeg\bin\ffprobe.exe"; Standard = @(
                 @("LOCALAPPDATA", "Microsoft\WinGet\Links\ffprobe.exe"),
                 @("ProgramFiles", "WinGet\Links\ffprobe.exe"),
                 @("LOCALAPPDATA", "Microsoft\WinGet\Packages\Gyan.FFmpeg_*\ffmpeg-*\bin\ffprobe.exe")) }
-        ytdlp   = @{ Name = "yt-dlp"; Page = "https://github.com/yt-dlp/yt-dlp#installation"; WingetId = "yt-dlp.yt-dlp"; Standard = @(
+        ytdlp   = @{ Name = "yt-dlp"; Page = "https://github.com/yt-dlp/yt-dlp#installation"; WingetId = "yt-dlp.yt-dlp"; Bundled = ""; Standard = @(
                 @("LOCALAPPDATA", "Microsoft\WinGet\Links\yt-dlp.exe"),
                 @("ProgramFiles", "WinGet\Links\yt-dlp.exe"),
                 @("LOCALAPPDATA", "Microsoft\WinGet\Packages\yt-dlp.yt-dlp_*\yt-dlp.exe")) }
-        python  = @{ Name = "Python"; Page = "https://www.python.org/downloads/windows/"; WingetId = "Python.Python.3.12"; Standard = @(
+        python  = @{ Name = "Python"; Page = "https://www.python.org/downloads/windows/"; WingetId = "Python.Python.3.12"; Bundled = "python\python.exe"; Standard = @(
                 @("LOCALAPPDATA", "Programs\Python\Python3*\python.exe"),
                 @("LOCALAPPDATA", "Python\pythoncore-3*\python.exe"),
                 @("ProgramFiles", "Python3*\python.exe")) }
-        whisper = @{ Name = "Local Whisper"; Page = "https://github.com/openai/whisper#setup"; WingetId = ""; Standard = @() }
+        whisper = @{ Name = "Local Whisper"; Page = "https://github.com/openai/whisper#setup"; WingetId = ""; Bundled = ""; Standard = @() }
     }
     return $sources[$Key]
+}
+
+# Installer plan, Stage 1: Media Manglers' own tools folder, the runtime folder beside this script in the
+# packaged application folder. Anchored on the script itself, never on the current folder.
+function Get-BundledToolsRoot {
+    if ([string]::IsNullOrWhiteSpace($script:BundledToolsRoot)) {
+        $script:BundledToolsRoot = if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) { "" } else { Join-Path $PSScriptRoot "runtime" }
+    }
+    return $script:BundledToolsRoot
+}
+
+# Media Manglers' own copy of a tool, or "" when it ships none or the copy is not there.
+function Get-BundledToolPath {
+    param([Parameter(Mandatory)] [string]$Key)
+
+    $source = Get-ToolSource -Key $Key
+    $root = Get-BundledToolsRoot
+    if (-not $source -or [string]::IsNullOrWhiteSpace($source.Bundled) -or [string]::IsNullOrWhiteSpace($root)) {
+        return ""
+    }
+    $candidate = Join-Path $root $source.Bundled
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+        return (Resolve-Path -LiteralPath $candidate).ProviderPath
+    }
+    return ""
+}
+
+# Installer plan, Stage 1: translation runs locally with Argos when a target language is set and the mode
+# is Local or Hybrid (an unset mode is Local). The Workbench's rule is dependencies.translation_needs_argos.
+function Test-TranslationNeedsArgos {
+    param([string[]]$TranslationTargets, [string]$Mode = "")
+
+    $targets = @($TranslationTargets | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    return ($targets.Count -gt 0) -and (@("", "local", "hybrid") -contains ([string]$Mode).Trim().ToLowerInvariant())
 }
 
 function Get-ToolStandardLocations {
@@ -1924,13 +1968,22 @@ function Resolve-ExecutablePath {
         [string]$ToolKey = ""
     )
 
-    # 188: the path given, then PATH, then the tool's own install folders.
+    # 188: the path given, then Media Manglers' own copy (installer plan, Stage 1), then PATH, then the
+    # tool's own install folders.
     $candidates = New-Object System.Collections.Generic.List[string]
     $looked = New-Object System.Collections.Generic.List[string]
 
     if (-not [string]::IsNullOrWhiteSpace($PreferredPath)) {
         $candidates.Add($PreferredPath)
         $looked.Add($PreferredPath)
+    }
+
+    if ($ToolKey) {
+        $bundled = Get-BundledToolPath -Key $ToolKey
+        if ($bundled) {
+            $candidates.Add($bundled)
+            $looked.Add($bundled)
+        }
     }
 
     foreach ($commandName in ($FallbackCommands | Where-Object { $_ })) {
@@ -1971,7 +2024,7 @@ function Resolve-ExecutablePath {
 function Get-FFprobePath {
     param([string]$FFmpegExe)
 
-    # FFprobe ships beside FFmpeg; then PATH, then its own install folders.
+    # FFprobe ships beside FFmpeg; then Media Manglers' own copy, then PATH, then its own install folders.
     $sibling = Join-Path (Split-Path $FFmpegExe -Parent) "ffprobe.exe"
     return Resolve-ExecutablePath `
         -PreferredPath $sibling `
@@ -2136,6 +2189,12 @@ function Resolve-PythonInterpreterPath {
         }
     }
 
+    # Installer plan, Stage 1: Media Manglers' own private Python comes first.
+    $bundledPython = Get-BundledToolPath -Key "python"
+    if ($bundledPython) {
+        return $bundledPython
+    }
+
     try {
         return Resolve-CommandOrPath -Value "python" -ToolName "Python interpreter"
     }
@@ -2166,13 +2225,19 @@ function Resolve-PythonInterpreterPath {
         }
     }
 
-    throw ("Python interpreter not found. Automatic resolution order: explicit -PythonExe, then python, then py -3, then Python's own install folders. {0}. Then run again, or rerun with -PythonExe pointing to a usable interpreter." -f (Get-ToolGetItText -Key "python"))
+    throw ("Python interpreter not found. Automatic resolution order: explicit -PythonExe, then Media Manglers' own Python, then python, then py -3, then Python's own install folders. {0}. Then run again, or rerun with -PythonExe pointing to a usable interpreter." -f (Get-ToolGetItText -Key "python"))
 }
 
 function Get-AutoPythonInterpreterCandidates {
     param([string]$PrimaryPythonCommand)
 
     $candidates = New-Object System.Collections.Generic.List[string]
+
+    # Installer plan, Stage 1: Media Manglers' own private Python is always looked at first.
+    $bundledPython = Get-BundledToolPath -Key "python"
+    if ($bundledPython) {
+        $candidates.Add($bundledPython)
+    }
 
     foreach ($candidate in @($PrimaryPythonCommand, "python")) {
         if ([string]::IsNullOrWhiteSpace($candidate)) {
@@ -2229,7 +2294,10 @@ function Get-AutoPythonInterpreterCandidates {
 }
 
 function Select-PreferredWhisperPythonInterpreter {
-    param([string]$PrimaryPythonCommand)
+    param(
+        [string]$PrimaryPythonCommand,
+        [switch]$TranslationNeedsArgos
+    )
 
     $candidatePaths = @(Get-AutoPythonInterpreterCandidates -PrimaryPythonCommand $PrimaryPythonCommand)
     if ($candidatePaths.Count -eq 0) {
@@ -2272,6 +2340,38 @@ function Select-PreferredWhisperPythonInterpreter {
                 Score = $score
             })
         $candidateIndex += 1
+    }
+
+    # Installer plan, Stage 1 (decision D7): Media Manglers' own Python, when it starts with the helper, unless
+    # one of the two kept exceptions applies to a Python already on the PC. The Workbench's rule is
+    # dependencies.select_python; tests\test_own_tools_first.py keeps the two equal.
+    $privatePython = Get-BundledToolPath -Key "python"
+    $ours = $null
+    if ($privatePython) {
+        $ours = $candidateResults | Where-Object { [string]::Equals([string]$_.RequestedPath, $privatePython, [System.StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1
+    }
+    if ($ours -and $ours.Probe -and $ours.Probe.HelperImportOk -and -not [string]::IsNullOrWhiteSpace([string]$ours.Probe.PythonVersion)) {
+        $others = @($candidateResults | Where-Object { $_.Index -ne $ours.Index })
+        $kept = $null
+        $keptNote = $null
+        if (-not $ours.Probe.CudaAvailable) {
+            $kept = $others | Where-Object { $_.Probe -and $_.Probe.WhisperImportOk -and $_.Probe.HelperImportOk -and $_.Probe.TorchImportOk -and $_.Probe.CudaAvailable } | Select-Object -First 1
+            if ($kept) {
+                $keptNote = "Kept your Python because it can use your graphics card."
+            }
+        }
+        if (-not $kept -and $TranslationNeedsArgos -and -not $ours.Probe.ArgosAvailable) {
+            $kept = $others | Where-Object { $_.Probe -and $_.Probe.ArgosAvailable -and $_.Probe.WhisperImportOk -and $_.Probe.HelperImportOk } | Select-Object -First 1
+            if ($kept) {
+                $keptNote = "Kept your Python because it has Argos Translate."
+            }
+        }
+        $chosen = if ($kept) { $kept } else { $ours }
+        return [PSCustomObject]@{
+            Path  = [string]$chosen.Path
+            Probe = $chosen.Probe
+            Note  = $keptNote
+        }
     }
 
     $selected = $candidateResults | Sort-Object -Property @{ Expression = "Score"; Descending = $true }, @{ Expression = "Index"; Descending = $false } | Select-Object -First 1
@@ -6227,6 +6327,10 @@ function Get-WhisperExecutionMode {
         if ($cliResult.ExitCode -eq 0 -and $cliResult.Result -and $cliResult.Result.ok) {
             $data = $cliResult.Result.data
             return [PSCustomObject]@{
+                # The helper answered, so it imports in this Python.
+                HelperImportOk  = $true
+                PrivatePython   = [bool]$data.private_python
+                ArgosAvailable  = [bool]$data.argos_available
                 WhisperImportOk = [bool]$data.whisper_import_ok
                 TorchImportOk   = [bool]$data.torch_import_ok
                 CudaAvailable   = [bool]$data.cuda_available
@@ -19332,7 +19436,7 @@ if ($TranscriptOnly) {
 
     $whisperProbe = $null
     if (-not $pythonLauncherWasExplicit) {
-        $pythonSelection = Select-PreferredWhisperPythonInterpreter -PrimaryPythonCommand $PythonExe
+        $pythonSelection = Select-PreferredWhisperPythonInterpreter -PrimaryPythonCommand $PythonExe -TranslationNeedsArgos:(Test-TranslationNeedsArgos -TranslationTargets $translationTargets -Mode $ProcessingMode)
         if ($pythonSelection) {
             if (-not [string]::IsNullOrWhiteSpace($pythonSelection.Path)) {
                 $PythonExe = $pythonSelection.Path
@@ -19693,7 +19797,7 @@ if ($CodexEvidencePackage) {
 
     $whisperProbe = $null
     if (-not $pythonLauncherWasExplicit) {
-        $pythonSelection = Select-PreferredWhisperPythonInterpreter -PrimaryPythonCommand $PythonExe
+        $pythonSelection = Select-PreferredWhisperPythonInterpreter -PrimaryPythonCommand $PythonExe -TranslationNeedsArgos:(Test-TranslationNeedsArgos -TranslationTargets $translationTargets -Mode $ProcessingMode)
         if ($pythonSelection) {
             if (-not [string]::IsNullOrWhiteSpace($pythonSelection.Path)) {
                 $PythonExe = $pythonSelection.Path
@@ -20033,7 +20137,7 @@ elseif ($ProcessingMode -eq "Hybrid" -and $translationTargets.Count -gt 0) {
 $requiresLocalWhisper = ($ProcessingMode -ne "AI" -or $OpenAiProject -eq "Public")
 $whisperProbe = $null
 if ($videosWithAudio.Count -gt 0 -and $requiresLocalWhisper -and -not $pythonLauncherWasExplicit) {
-    $pythonSelection = Select-PreferredWhisperPythonInterpreter -PrimaryPythonCommand $PythonExe
+    $pythonSelection = Select-PreferredWhisperPythonInterpreter -PrimaryPythonCommand $PythonExe -TranslationNeedsArgos:(Test-TranslationNeedsArgos -TranslationTargets $translationTargets -Mode $ProcessingMode)
     if ($pythonSelection) {
         if (-not [string]::IsNullOrWhiteSpace($pythonSelection.Path)) {
             $PythonExe = $pythonSelection.Path

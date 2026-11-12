@@ -33,6 +33,7 @@ from media_manglers.core.sparse_narration import (
     write_pcm_chunk,
 )
 from media_manglers.core.transcripts import write_transcript_files
+from media_manglers.core.whisper_models import ModelNotApproved
 from media_manglers.core.whisper_runtime import build_runtime_plan
 
 
@@ -188,9 +189,16 @@ def _classify_probe_environment(result: dict[str, Any]) -> None:
 
 def probe_environment(*, emit_logs: bool = True) -> dict[str, Any]:
     _configure_stdio()
+    import importlib.util  # noqa: PLC0415
+
+    from media_manglers.core.private_runtime import is_private_python  # noqa: PLC0415
+
     result: dict[str, Any] = {
         "python_path": sys.executable,
         "python_version": sys.version.split()[0],
+        # Installer plan, Stage 1: what the backend's choice of Python needs to know (Select-PreferredWhisperPythonInterpreter).
+        "private_python": is_private_python(),
+        "argos_available": importlib.util.find_spec("argostranslate") is not None,
         "whisper_import_ok": False,
         "torch_import_ok": False,
         "cuda_available": False,
@@ -549,6 +557,8 @@ def _run_transcription(
                 _log(f"[PY] GPU half precision failed; retrying on GPU in full precision. {half_exc}")
                 result, fp16 = run("cuda", allow_fp16=False)
             return result, "cuda", fp16, gpu_error
+        except ModelNotApproved:
+            raise  # Stage 3: a model not approved is not a graphics-card failure; the CPU would refuse it too
         except Exception as exc:
             gpu_error = str(exc)
             _log(f"[PY] GPU transcription failed. Retrying on CPU. {exc}")
@@ -614,11 +624,24 @@ def seed_whisper_decoder(seed: int = WHISPER_DECODER_SEED) -> None:
 
 
 def load_whisper_model(model_name: str, device: str) -> Any:
-    """214: the one place a Whisper model is loaded, for transcription and for voice probes alike."""
+    """214: the one place a Whisper model is loaded, for transcription and for voice probes alike.
+
+    Installer plan, Stage 3: the one approval check, for every feature and whichever Python runs it. A model
+    file already in the Whisper cache whose SHA-256 matches the one in Whisper's own address for it is loaded by
+    name with ``download_root`` (by name, so the word-timing data the AI Video Editor needs is kept), with no
+    download. Otherwise ``ModelNotApproved`` is raised and Whisper is never called, so it cannot download a model
+    by itself or replace a damaged one; only the operator's approval downloads it (``whisper_models``)."""
 
     import whisper  # type: ignore[import-not-found]
 
-    return whisper.load_model(model_name, device=device)
+    from media_manglers.core.whisper_models import checked_model_file  # noqa: PLC0415 - kept beside its one use
+
+    table = getattr(whisper, "_MODELS", None)
+    if model_name not in (table or {}) and os.path.isfile(model_name):
+        # A model file named by its path is loaded from that file, as Whisper does; it never downloads one.
+        return whisper.load_model(model_name, device=device)
+    checked = checked_model_file(model_name, table=table)
+    return whisper.load_model(model_name, device=device, download_root=str(checked.parent))
 
 
 def _apply_glossary_corrections(result: dict[str, Any], glossary_entries: Any) -> list[dict[str, Any]]:

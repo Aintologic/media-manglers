@@ -241,7 +241,9 @@ class MissingToolsTests(unittest.TestCase):
         before = self.settings_path.read_bytes()
         calls = self._check(window, saved["dependency_python_path"], force_candidates=False)
         pythons = [path for path in self.probed if "python" in Path(path).name]
-        self.assertEqual(pythons, [saved["dependency_python_path"]], "only the saved Python is tried")
+        # Installer plan, Stage 3: the saved Python is asked twice (its own check, then its Whisper models'), and
+        # no other Python is tried.
+        self.assertEqual(sorted(set(pythons)), [saved["dependency_python_path"]], "only the saved Python is tried")
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0]["configured_python"], saved["dependency_python_path"])
         self.assertEqual(calls[0]["configured_ffmpeg"], saved["dependency_ffmpeg_path"])

@@ -25,10 +25,20 @@ renames and clean-ups use it too (``move``, ``remove``, ``remove_disposable_tree
 
 It also makes the one checked copy of a database (``checked_copy``, 224 Wave B2a): a backup the app relies on
 gets its real name only after it passed SQLite's damage check and holds every table's rows.
+
+Installer plan, Stage 2: every NEW file step (a download put in place, the speech libraries unpacked into a
+temporary folder and renamed into place, older speech-library sets removed, the add-ons removed, data removed at
+uninstall) passes a ``StepBudget`` and follows stricter rules. The wait is measured by the clock: at most ten
+seconds per file and thirty seconds for the whole step. Every file of a folder is asked about, not only the first
+512. ``FileInUse`` carries the holders as a list (``Holder``), and the message names a program, a Windows service,
+or a Media Manglers that is still running, each in its own words. A read-only file, or one the app itself holds,
+stops at once. No message ever advises an exclusion or turning protection off. The app's older file steps keep
+their own waits until the next wave.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import errno
 import hashlib
 import json
@@ -36,6 +46,7 @@ import os
 from pathlib import Path
 import shutil
 import sqlite3
+import stat
 import time
 from typing import Any, Callable, Iterator, TypeVar
 from urllib.parse import quote
@@ -63,15 +74,71 @@ _DIRECTORY_NOT_EMPTY = 145
 _HOLDER_FILES_PER_FOLDER = 512
 
 
+# Installer plan, Stage 2: a new file step waits at most this long for one file, and this long in all.
+NEW_STEP_FILE_SECONDS = 10.0
+NEW_STEP_SECONDS = 30.0
+# Restart Manager's kind for a Windows service; and the Workbench's program name.
+_RM_SERVICE = 3
+WORKBENCH_PROGRAM = "VideoManglerWorkbench.exe"
+# Restart Manager is asked about this many files at a time; a folder's files are all asked about, in parts.
+_RM_FILES_PER_CALL = 1000
+
+
+@dataclass(frozen=True, slots=True)
+class Holder:
+    """A program that has a file open, as Windows' Restart Manager reports it.
+
+    ``kind`` is "app" (this process, the Workbench that started it, or one of their children), "workbench" (a
+    Media Manglers window still running), "service" (a Windows service) or "program"."""
+
+    pid: int
+    name: str
+    kind: str = "program"
+    service: str = ""
+
+    def describe(self) -> str:
+        if self.kind == "service":
+            return f"the Windows service {self.name or self.service} (process {self.pid})"
+        if self.kind in {"workbench", "app"}:
+            return f"Media Manglers (process {self.pid})"
+        return f"{self.name or 'a program'} (process {self.pid})"
+
+
 class FileInUse(PermissionError):
     """Windows still refused to replace, move or remove the file after the wait (another program kept it open),
     or the app itself holds it. It was left as it was. The message names the program when Windows can say
-    which."""
+    which; a new file step (Stage 2) also lists them in ``holders``."""
+
+    holders: tuple[Holder, ...] = ()
 
 
 class FileStepRefused(OSError):
     """A move or removal Windows refused for a reason other than another program holding the file (the path is
     not there, the disk is full, a folder on another drive). Nothing was moved or removed."""
+
+
+class DownloadNotChecked(FileStepRefused):
+    """A downloaded file's SHA-256 did not match the one it was pinned to. It was removed, never put in place."""
+
+
+class StepBudget:
+    """One new file step's time, measured by the clock (installer plan, Stage 2): each file waits at most
+    ``per_file`` seconds, and every file of the step together at most ``per_step``. ``clock`` is for tests."""
+
+    def __init__(self, per_file: float = NEW_STEP_FILE_SECONDS, per_step: float = NEW_STEP_SECONDS,
+                 clock: Callable[[], float] = time.monotonic) -> None:
+        self.per_file = float(per_file)
+        self.per_step = float(per_step)
+        self.clock = clock
+        self.started = clock()
+
+    def file_deadline(self) -> float:
+        """When the file starting now must be done: its own limit, or the step's, whichever comes first."""
+
+        return min(self.clock() + self.per_file, self.started + self.per_step)
+
+    def spent(self) -> float:
+        return self.clock() - self.started
 
 
 class CopyNotChecked(RuntimeError):
@@ -140,7 +207,7 @@ def _replace(target: Path, write: Callable[[Path], None], wait: float) -> Path:
 
 
 def remove(path: Path | str, *, wait: float = SHORT_WAIT_SECONDS,
-           pause: Callable[[float], None] | None = None) -> None:
+           pause: Callable[[float], None] | None = None, budget: StepBudget | None = None) -> None:
     """Delete the file ``path`` if it is there, waiting for a program that has it open for a moment."""
 
     target = Path(path)
@@ -148,11 +215,11 @@ def remove(path: Path | str, *, wait: float = SHORT_WAIT_SECONDS,
     def unlink() -> None:
         target.unlink(missing_ok=True)
 
-    _with_wait(unlink, [target], "removed", wait, pause, source=target)
+    _with_wait(unlink, [target], "removed", wait, pause, source=target, budget=budget)
 
 
 def move(source: Path | str, destination: Path | str, *, wait: float = INBOX_WAIT_SECONDS,
-         pause: Callable[[float], None] | None = None) -> Path:
+         pause: Callable[[float], None] | None = None, budget: StepBudget | None = None) -> Path:
     """Move the file or folder ``source`` to ``destination``, which must not be there yet (nothing is ever
     written over). On one drive it is a rename. A file moving to another drive is copied, checked byte for
     byte, given its name, and only then removed from where it was; a folder is only ever moved within one
@@ -171,25 +238,27 @@ def move(source: Path | str, destination: Path | str, *, wait: float = INBOX_WAI
         raise _refused(exc, source, "moved") from exc
     if _same_drive(source, destination.parent):
         # os.rename, unlike os.replace, refuses a destination that appeared in the meantime.
-        _with_wait(lambda: os.rename(source, destination), _holder_paths(source), "moved", wait, pause,
-                   source=source)
+        _with_wait(lambda: os.rename(source, destination), _holder_paths(source, budget), "moved", wait, pause,
+                   source=source, budget=budget)
         return destination
     if source.is_dir():
         raise FileStepRefused(
             f"{source.name} could not be moved: a folder is moved only within one drive, and "
             f"{destination.parent} is on another. Nothing was moved. ({source})")
-    copy_file(source, destination, wait=wait, pause=pause)
+    copy_file(source, destination, wait=wait, pause=pause, budget=budget)
     try:
-        remove(source, wait=wait, pause=pause)
+        remove(source, wait=wait, pause=pause, budget=budget)
     except FileInUse as exc:
-        raise FileInUse(
+        raised = FileInUse(
             f"{source.name} was copied to {destination} and checked, but the original could not be removed: "
-            f"{exc} Nothing was lost.") from exc
+            f"{exc} Nothing was lost.")
+        raised.holders = exc.holders
+        raise raised from exc
     return destination
 
 
 def copy_file(source: Path | str, destination: Path | str, *, wait: float = INBOX_WAIT_SECONDS,
-              pause: Callable[[float], None] | None = None) -> Path:
+              pause: Callable[[float], None] | None = None, budget: StepBudget | None = None) -> Path:
     """A copy of the file ``source`` at ``destination`` (which must not be there yet), made under a short
     partial name beside it, flushed to the disk and checked byte for byte against the original before it gets
     its name. A copy that does not check out is removed and never looks like the real file."""
@@ -212,7 +281,7 @@ def copy_file(source: Path | str, destination: Path | str, *, wait: float = INBO
             raise FileStepRefused(f"The copy of {source.name} did not match the original, so it was not kept. "
                                   f"Nothing was lost. ({source})")
         _with_wait(lambda: os.rename(partial, destination), [partial, destination], "moved", wait, pause,
-                   source=partial)
+                   source=partial, budget=budget)
     finally:
         try:
             partial.unlink(missing_ok=True)
@@ -222,13 +291,14 @@ def copy_file(source: Path | str, destination: Path | str, *, wait: float = INBO
 
 
 def remove_disposable_tree(path: Path | str, *, within: Path | str, wait: float = INBOX_WAIT_SECONDS,
-                           pause: Callable[[float], None] | None = None, leftovers: Path | str | None = None) -> None:
+                           pause: Callable[[float], None] | None = None, leftovers: Path | str | None = None,
+                           budget: StepBudget | None = None) -> None:
     """Delete ``path`` (a folder or a file) the app made and no longer needs, which must lie inside ``within``.
 
     A folder is first renamed to a trash name beside it and then deleted, so a delete cut short never looks
     like real data. When another program still holds something in it at the deadline, ``FileInUse`` is raised
     with what was left; with ``leftovers`` the path is also noted there, and ``sweep_leftovers`` removes it at
-    the next run."""
+    the next run. With ``budget`` it is a new file step (Stage 2)."""
 
     target, root = Path(path), Path(within)
     if not _strictly_within(root, target):
@@ -238,7 +308,7 @@ def remove_disposable_tree(path: Path | str, *, within: Path | str, wait: float 
         return
     if not target.is_dir():
         try:
-            remove(target, wait=wait, pause=pause)
+            remove(target, wait=wait, pause=pause, budget=budget)
         except FileInUse:
             _note_leftover(leftovers, target, root)
             raise
@@ -246,13 +316,14 @@ def remove_disposable_tree(path: Path | str, *, within: Path | str, wait: float 
         return
     trash = target.with_name(f"{TRASH_PREFIX}{uuid.uuid4().hex[:12]}")
     try:
-        _with_wait(lambda: os.rename(target, trash), _holder_paths(target), "removed", wait, pause, source=target)
+        _with_wait(lambda: os.rename(target, trash), _holder_paths(target, budget), "removed", wait, pause,
+                   source=target, budget=budget)
     except (FileInUse, FileStepRefused):
         _note_leftover(leftovers, target, root)
         raise
     try:
-        _with_wait(lambda: shutil.rmtree(trash), _holder_paths(trash), "removed", wait, pause, source=trash,
-                   deleting=True)
+        _with_wait(lambda: shutil.rmtree(trash), _holder_paths(trash, budget), "removed", wait, pause, source=trash,
+                   deleting=True, budget=budget)
     except FileInUse:
         _note_leftover(leftovers, trash, root)
         raise
@@ -378,6 +449,55 @@ def _replace_file_windows(target: Path, replacement: Path, backup: Path) -> None
     raise OSError(errno.EACCES, ctypes.FormatError(code).strip(), str(target), code)
 
 
+# New file steps (installer plan, Stage 2) -----------------------------------------------------------------
+
+
+def place_checked(partial: Path | str, target: Path | str, sha256: str, *, replace: bool = False,
+                  budget: StepBudget | None = None, pause: Callable[[float], None] | None = None) -> Path:
+    """Put a finished download in place: ``partial`` is checked against its pinned ``sha256`` first, and only
+    then given ``target``'s name. A file that does not match is removed and never looks like the real one.
+    A file already at ``target`` is replaced only when the caller says ``replace`` (an approved download
+    replacing a damaged copy); otherwise it is never written over."""
+
+    partial, target = Path(partial), Path(target)
+    budget = budget or StepBudget()
+    if not partial.is_file():
+        raise FileStepRefused(f"{target.name} was not put in place: its download is not there. ({partial})")
+    found = _sha256(partial)
+    if found.casefold() != str(sha256 or "").strip().casefold():
+        try:
+            remove(partial, pause=pause, budget=budget)
+        except OSError:
+            pass
+        raise DownloadNotChecked(
+            f"The download of {target.name} did not match its published checksum, so it was not kept. Nothing "
+            f"else was changed; try the download again. ({target})")
+    if os.path.lexists(target) and not replace:
+        raise FileStepRefused(f"{target.name} was not put in place: it is already there, and the app never writes "
+                              f"over it. ({target})")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    step = (lambda: os.replace(partial, target)) if replace else (lambda: os.rename(partial, target))  # noqa: E731
+    _with_wait(step, [partial, target], "put in place", 0.0, pause, source=partial, budget=budget)
+    return target
+
+
+def rename_into_place(temporary: Path | str, final: Path | str, *, budget: StepBudget | None = None,
+                      pause: Callable[[float], None] | None = None) -> Path:
+    """Give a file or folder built under a temporary name its final name, on the same drive. ``final`` must not
+    be there yet; nothing is ever written over."""
+
+    temporary, final = Path(temporary), Path(final)
+    budget = budget or StepBudget()
+    if not os.path.lexists(temporary):
+        raise FileStepRefused(f"{final.name} was not put in place: {temporary.name} is not there. ({temporary})")
+    if os.path.lexists(final):
+        raise FileStepRefused(f"{final.name} was not put in place: it is already there, and the app never writes "
+                              f"over it. ({final})")
+    _with_wait(lambda: os.rename(temporary, final), _holder_paths(temporary, budget), "put in place", 0.0, pause,
+               source=temporary, budget=budget)
+    return final
+
+
 # The one wait ----------------------------------------------------------------------------------------
 
 
@@ -411,11 +531,13 @@ def _is_hold(exc: OSError, source: Path | None, *, deleting: bool = False) -> bo
 
 def _with_wait(step: Callable[[], T], paths: list[Path], done: str, wait: float,
                pause: Callable[[float], None] | None, *, source: Path | None = None, app_check: bool = True,
-               deleting: bool = False) -> T:
+               deleting: bool = False, budget: StepBudget | None = None) -> T:
     """Run ``step``, waiting a bounded time while another program holds the file. Without ``app_check`` a hold
     by the app itself is waited for too (a small file's replace, which the app's own reader holds only for a
-    moment)."""
+    moment). With ``budget`` it is a new file step and follows Stage 2's rules (``_with_budget``)."""
 
+    if budget is not None:
+        return _with_budget(step, paths, done, budget, pause, source=source, deleting=deleting)
     pauses = _pauses(wait)
     asked = not app_check
     while True:
@@ -434,6 +556,94 @@ def _with_wait(step: Callable[[], T], paths: list[Path], done: str, wait: float,
             if delay is None:
                 raise FileInUse(_held_message(paths[0], done, paths)) from exc
             (pause or time.sleep)(delay)
+
+
+def _with_budget(step: Callable[[], T], paths: list[Path], done: str, budget: StepBudget,
+                 pause: Callable[[float], None] | None, *, source: Path | None = None, deleting: bool = False) -> T:
+    """Stage 2's wait for a new file step: by the clock, at most ``budget``'s time for this file and for the step;
+    the holders asked at the first refusal and at the deadline; a read-only file or the app's own hold stops at
+    once."""
+
+    deadline = budget.file_deadline()
+    asked = False
+    index = 0
+    while True:
+        try:
+            return step()
+        except OSError as exc:
+            read_only = _read_only_path(exc, paths)
+            if read_only is not None:
+                raise _read_only_refusal(read_only, done) from exc
+            if not _is_hold(exc, source, deleting=deleting):
+                if done in {"moved", "removed", "put in place"}:
+                    raise _refused(exc, paths[0], done) from exc
+                raise
+            if not asked:
+                asked = True
+                found = holder_list(paths)
+                if any(holder.kind == "app" for holder in found):
+                    raised = FileInUse(_own_message(paths[0], done))
+                    raised.holders = tuple(found)
+                    raise raised from exc
+            now = budget.clock()
+            if now >= deadline:
+                found = holder_list(paths)
+                raised = FileInUse(new_step_held_message(paths[0], done, found))
+                raised.holders = tuple(found)
+                raise raised from exc
+            delay = PAUSE_STEPS[index] if index < len(PAUSE_STEPS) else LATER_PAUSE_SECONDS
+            index += 1
+            (pause or time.sleep)(max(0.0, min(delay, deadline - now)))
+
+
+def _read_only_path(exc: OSError, paths: list[Path]) -> Path | None:
+    """The file Windows refused because it is marked read-only, if that is why: waiting cannot help with it.
+
+    Only the file Windows named, or the step's own target, is looked at: another read-only file elsewhere in a
+    folder says nothing about why this one was refused, and a real hold must still be waited for."""
+
+    if os.name != "nt" or getattr(exc, "winerror", None) != _ACCESS_DENIED:
+        return None
+    for candidate in [exc.filename, paths[0] if paths else None]:
+        if not candidate:
+            continue
+        try:
+            attributes = os.lstat(candidate).st_file_attributes  # type: ignore[attr-defined]
+        except (OSError, AttributeError):
+            continue
+        if attributes & stat.FILE_ATTRIBUTE_READONLY and not attributes & stat.FILE_ATTRIBUTE_DIRECTORY:
+            return Path(candidate)
+    return None
+
+
+def _read_only_refusal(path: Path, done: str) -> FileStepRefused:
+    return FileStepRefused(
+        f"{path.name} could not be {done}: it is marked read-only, so the app did not wait. Nothing was lost. "
+        f"Clear its read-only setting in its Properties, then try again. ({path})")
+
+
+def new_step_held_message(target: Path, done: str, found: list[Holder]) -> str:
+    """The plain message when a new file step is still refused at its deadline, naming who holds the file."""
+
+    target = Path(target)
+    lost = "Nothing was lost."
+    workbench = [holder for holder in found if holder.kind == "workbench"]
+    if workbench:
+        return (f"{target.name} could not be {done} because Media Manglers is still running and has it open "
+                f"({', '.join(holder.describe() for holder in workbench)}). {lost} Close Media Manglers, then try "
+                f"again. ({target})")
+    services = [holder for holder in found if holder.kind == "service"]
+    programs = [holder for holder in found if holder.kind == "program"]
+    if programs:
+        names = ", ".join(holder.describe() for holder in programs + services)
+        return (f"{target.name} could not be {done} because {names} has it open. {lost} Close that program, or "
+                f"wait a moment, then try again. ({target})")
+    if services:
+        names = ", ".join(holder.describe() for holder in services)
+        return (f"{target.name} could not be {done} because {names} has it open. {lost} Wait a moment, then try "
+                f"again. ({target})")
+    return (f"{target.name} could not be {done}: another program has it open, and Windows did not say which. "
+            f"{lost} Wait a moment, then try again. ({target})")
 
 
 def _refused(exc: OSError, path: Path, done: str) -> FileStepRefused:
@@ -461,8 +671,9 @@ def _held_message(target: Path, done: str, paths: list[Path]) -> str:
             f"that it is not read-only. ({target})")
 
 
-def _holder_paths(path: Path) -> list[Path]:
-    """The paths Windows is asked about for ``path``: a folder's holder is found through the files inside."""
+def _holder_paths(path: Path, budget: StepBudget | None = None) -> list[Path]:
+    """The paths Windows is asked about for ``path``: a folder's holder is found through the files inside. An older
+    step asks about the first 512; a new file step (``budget``) about every one."""
 
     if not path.is_dir():
         return [path]
@@ -470,7 +681,7 @@ def _holder_paths(path: Path) -> list[Path]:
     for current, _folders, files in os.walk(path):
         for name in files:
             found.append(Path(current) / name)
-            if len(found) > _HOLDER_FILES_PER_FOLDER:
+            if budget is None and len(found) > _HOLDER_FILES_PER_FOLDER:
                 return found
     return found
 
@@ -522,8 +733,37 @@ def holders(paths: list[Path]) -> list[str]:
     return [f"{name or 'a program'} (process {pid})" for pid, _start, name in _holder_processes(paths)]
 
 
+def holder_list(paths: list[Path]) -> list[Holder]:
+    """Every program holding any of ``paths``, each with its kind: the app itself, a Media Manglers still running,
+    a Windows service, or another program (installer plan, Stage 2)."""
+
+    found = _holder_details(paths)
+    if not found:
+        return []
+    roots = _app_roots()
+    parents = _parent_processes()
+    listed: list[Holder] = []
+    for pid, started, name, service, app_type in found:
+        if _is_app(pid, started, roots, parents):
+            kind = "app"
+        elif _program_file(pid).casefold() == WORKBENCH_PROGRAM.casefold():
+            kind = "workbench"
+        elif app_type == _RM_SERVICE or service:
+            kind = "service"
+        else:
+            kind = "program"
+        listed.append(Holder(pid, name, kind, service))
+    return listed
+
+
 def _holder_processes(paths: list[Path]) -> list[tuple[int, int, str]]:
     """(process number, start time, name) of every program holding any of ``paths``."""
+
+    return [(pid, started, name) for pid, started, name, _service, _kind in _holder_details(paths)]
+
+
+def _holder_details(paths: list[Path]) -> list[tuple[int, int, str, str, int]]:
+    """(process number, start time, name, service name, Restart Manager kind) of every holder of ``paths``."""
 
     if os.name != "nt":
         return []
@@ -535,7 +775,37 @@ def _holder_processes(paths: list[Path]) -> list[tuple[int, int, str]]:
         return []
 
 
-def _restart_manager_holders(paths: list[str]) -> list[tuple[int, int, str]]:
+def _program_file(pid: int) -> str:
+    """The file name of the program running as process ``pid`` ("" when Windows will not say)."""
+
+    if os.name != "nt":
+        return ""
+    try:
+        import ctypes  # noqa: PLC0415
+        from ctypes import wintypes  # noqa: PLC0415
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR,
+                                                        ctypes.POINTER(wintypes.DWORD)]
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return ""
+        try:
+            size = wintypes.DWORD(1024)
+            buffer = ctypes.create_unicode_buffer(size.value)
+            if not kernel32.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(size)):
+                return ""
+            return Path(buffer.value).name
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _restart_manager_holders(paths: list[str]) -> list[tuple[int, int, str, str, int]]:
     import ctypes
     from ctypes import wintypes
 
@@ -553,9 +823,12 @@ def _restart_manager_holders(paths: list[str]) -> list[tuple[int, int, str]]:
     if manager.RmStartSession(ctypes.byref(session), 0, key) != 0:
         return []
     try:
-        files = (wintypes.LPCWSTR * len(paths))(*paths)
-        if manager.RmRegisterResources(session, len(paths), files, 0, None, 0, None) != 0:
-            return []
+        # Asked in parts, so every file of a large folder (a speech-library set has thousands) is asked about.
+        for start in range(0, len(paths), _RM_FILES_PER_CALL):
+            part = paths[start:start + _RM_FILES_PER_CALL]
+            files = (wintypes.LPCWSTR * len(part))(*part)
+            if manager.RmRegisterResources(session, len(part), files, 0, None, 0, None) != 0:
+                return []
         needed, count, reasons = wintypes.UINT(0), wintypes.UINT(0), wintypes.DWORD(0)
         result = manager.RmGetList(session, ctypes.byref(needed), ctypes.byref(count), None, ctypes.byref(reasons))
         if result not in (0, 234) or needed.value == 0:  # 234: more data, the list is the size given in needed
@@ -564,11 +837,11 @@ def _restart_manager_holders(paths: list[str]) -> list[tuple[int, int, str]]:
         count = wintypes.UINT(needed.value)
         if manager.RmGetList(session, ctypes.byref(needed), ctypes.byref(count), found, ctypes.byref(reasons)) != 0:
             return []
-        seen: list[tuple[int, int, str]] = []
+        seen: list[tuple[int, int, str, str, int]] = []
         for info in found[: count.value]:
             started = info.Process.ProcessStartTime
             entry = (int(info.Process.dwProcessId), (started.dwHighDateTime << 32) | started.dwLowDateTime,
-                     str(info.strAppName or ""))
+                     str(info.strAppName or ""), str(info.strServiceShortName or ""), int(info.ApplicationType))
             if entry not in seen:
                 seen.append(entry)
         return seen

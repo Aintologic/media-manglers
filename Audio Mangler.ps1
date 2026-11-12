@@ -1072,33 +1072,58 @@ function Invoke-PhaseAction {
     }
 }
 
-# 188: where each outside tool comes from, and its own install folders. The Workbench has the same
+# 188: where each tool comes from, and its own install folders. The Workbench has the same
 # table (src\media_manglers_workbench\tool_sources.py); tests\test_tool_sources.py keeps them equal.
-# Every tool is looked for in the same order: the path given, then PATH, then these folders.
+# Every tool is looked for in the same order: the path given, then Media Manglers' own copy (Bundled,
+# below the runtime folder beside this script; installer plan Stage 1), then PATH, then these folders.
 # Nothing here downloads or installs anything.
 function Get-ToolSource {
     param([Parameter(Mandatory)] [string]$Key)
 
     $sources = @{
-        ffmpeg  = @{ Name = "FFmpeg"; Page = "https://ffmpeg.org/download.html"; WingetId = "Gyan.FFmpeg"; Standard = @(
+        ffmpeg  = @{ Name = "FFmpeg"; Page = "https://ffmpeg.org/download.html"; WingetId = "Gyan.FFmpeg"; Bundled = "ffmpeg\bin\ffmpeg.exe"; Standard = @(
                 @("LOCALAPPDATA", "Microsoft\WinGet\Links\ffmpeg.exe"),
                 @("ProgramFiles", "WinGet\Links\ffmpeg.exe"),
                 @("LOCALAPPDATA", "Microsoft\WinGet\Packages\Gyan.FFmpeg_*\ffmpeg-*\bin\ffmpeg.exe")) }
-        ffprobe = @{ Name = "FFprobe"; Page = "https://ffmpeg.org/download.html"; WingetId = "Gyan.FFmpeg"; Standard = @(
+        ffprobe = @{ Name = "FFprobe"; Page = "https://ffmpeg.org/download.html"; WingetId = "Gyan.FFmpeg"; Bundled = "ffmpeg\bin\ffprobe.exe"; Standard = @(
                 @("LOCALAPPDATA", "Microsoft\WinGet\Links\ffprobe.exe"),
                 @("ProgramFiles", "WinGet\Links\ffprobe.exe"),
                 @("LOCALAPPDATA", "Microsoft\WinGet\Packages\Gyan.FFmpeg_*\ffmpeg-*\bin\ffprobe.exe")) }
-        ytdlp   = @{ Name = "yt-dlp"; Page = "https://github.com/yt-dlp/yt-dlp#installation"; WingetId = "yt-dlp.yt-dlp"; Standard = @(
+        ytdlp   = @{ Name = "yt-dlp"; Page = "https://github.com/yt-dlp/yt-dlp#installation"; WingetId = "yt-dlp.yt-dlp"; Bundled = ""; Standard = @(
                 @("LOCALAPPDATA", "Microsoft\WinGet\Links\yt-dlp.exe"),
                 @("ProgramFiles", "WinGet\Links\yt-dlp.exe"),
                 @("LOCALAPPDATA", "Microsoft\WinGet\Packages\yt-dlp.yt-dlp_*\yt-dlp.exe")) }
-        python  = @{ Name = "Python"; Page = "https://www.python.org/downloads/windows/"; WingetId = "Python.Python.3.12"; Standard = @(
+        python  = @{ Name = "Python"; Page = "https://www.python.org/downloads/windows/"; WingetId = "Python.Python.3.12"; Bundled = "python\python.exe"; Standard = @(
                 @("LOCALAPPDATA", "Programs\Python\Python3*\python.exe"),
                 @("LOCALAPPDATA", "Python\pythoncore-3*\python.exe"),
                 @("ProgramFiles", "Python3*\python.exe")) }
-        whisper = @{ Name = "Local Whisper"; Page = "https://github.com/openai/whisper#setup"; WingetId = ""; Standard = @() }
+        whisper = @{ Name = "Local Whisper"; Page = "https://github.com/openai/whisper#setup"; WingetId = ""; Bundled = ""; Standard = @() }
     }
     return $sources[$Key]
+}
+
+# Installer plan, Stage 1: Media Manglers' own tools folder, the runtime folder beside this script.
+function Get-BundledToolsRoot {
+    if ([string]::IsNullOrWhiteSpace($script:BundledToolsRoot)) {
+        $script:BundledToolsRoot = if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) { "" } else { Join-Path $PSScriptRoot "runtime" }
+    }
+    return $script:BundledToolsRoot
+}
+
+# Media Manglers' own copy of a tool, or "" when it ships none or the copy is not there.
+function Get-BundledToolPath {
+    param([Parameter(Mandatory)] [string]$Key)
+
+    $source = Get-ToolSource -Key $Key
+    $root = Get-BundledToolsRoot
+    if (-not $source -or [string]::IsNullOrWhiteSpace($source.Bundled) -or [string]::IsNullOrWhiteSpace($root)) {
+        return ""
+    }
+    $candidate = Join-Path $root $source.Bundled
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+        return (Resolve-Path -LiteralPath $candidate).ProviderPath
+    }
+    return ""
 }
 
 function Get-ToolStandardLocations {
@@ -1145,13 +1170,22 @@ function Resolve-ExecutablePath {
         [string]$ToolKey = ""
     )
 
-    # 188: the path given, then PATH, then the tool's own install folders.
+    # 188: the path given, then Media Manglers' own copy (installer plan, Stage 1), then PATH, then the
+    # tool's own install folders.
     $candidates = New-Object System.Collections.Generic.List[string]
     $looked = New-Object System.Collections.Generic.List[string]
 
     if (-not [string]::IsNullOrWhiteSpace($PreferredPath)) {
         $candidates.Add($PreferredPath)
         $looked.Add($PreferredPath)
+    }
+
+    if ($ToolKey) {
+        $bundled = Get-BundledToolPath -Key $ToolKey
+        if ($bundled) {
+            $candidates.Add($bundled)
+            $looked.Add($bundled)
+        }
     }
 
     foreach ($commandName in ($FallbackCommands | Where-Object { $_ })) {

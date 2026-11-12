@@ -31,6 +31,7 @@ from media_manglers.core.race_video import requests as race_requests  # noqa: E4
 from media_manglers.core.race_video.timeline import DEFAULT_LAYOUT, SCHEMA  # noqa: E402
 from media_manglers.core.spelling_words import SETTING_KEY as WORDS_KEY  # noqa: E402
 from media_manglers.providers import whisper_local  # noqa: E402
+from tests.whisper_test_models import checked_whisper  # noqa: E402
 
 FFMPEG = shutil.which("ffmpeg")
 FFPROBE = shutil.which("ffprobe")
@@ -680,7 +681,7 @@ class TranscriptTests(PrepareTestCase):
 
     def run_prepare(self, source: Path, **extra) -> tuple[dict, list[dict]]:
         FakeWhisper.loads, FakeWhisper.heard = [], []
-        with mock.patch.dict(sys.modules, {"whisper": FakeWhisper(), "torch": _CpuTorch()}), \
+        with mock.patch.dict(sys.modules, {"whisper": checked_whisper(FakeWhisper()), "torch": _CpuTorch()}), \
                 mock.patch.object(whisper_local, "transcribe_from_request",
                                   wraps=whisper_local.transcribe_from_request) as helper:
             result = self.prepare(source, skip_transcript=False, **extra)
@@ -769,7 +770,7 @@ class TranscriptTests(PrepareTestCase):
 
         def run(handler, payload: dict) -> dict:
             FakeWhisper.loads, FakeWhisper.heard = [], []
-            with mock.patch.dict(sys.modules, {"whisper": _GameEchoWhisper(), "torch": _CpuTorch()}), \
+            with mock.patch.dict(sys.modules, {"whisper": checked_whisper(_GameEchoWhisper()), "torch": _CpuTorch()}), \
                     contextlib.redirect_stdout(io.StringIO()):
                 return handler(payload)
 
@@ -816,7 +817,7 @@ class ReactionRecheckTests(PrepareTestCase):
         # the near-silent check then takes the sentence out, and the reaction has no anchor left.
         source = editor_recording(self.root / "race.mkv", [("reaction", "T1 - Narration"), ("engine", "T2 - Game")])
         FakeWhisper.loads, FakeWhisper.heard = [], []
-        with mock.patch.dict(sys.modules, {"whisper": _ReactionWhisper(), "torch": _CpuTorch()}), \
+        with mock.patch.dict(sys.modules, {"whisper": checked_whisper(_ReactionWhisper()), "torch": _CpuTorch()}), \
                 mock.patch.object(whisper_local, "transcribe_from_request",
                                   wraps=whisper_local.transcribe_from_request) as helper:
             result = self.prepare(source, skip_transcript=False, skip_game_speech=True)

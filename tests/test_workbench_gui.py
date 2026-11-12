@@ -551,6 +551,7 @@ class WorkbenchGuiTests(unittest.TestCase):
             purpose="Controls transcription accuracy and local storage.",
             action_label="Approve download",
             action_kind="approve_model_download",
+            model="medium",
         )
         repair = DependencyStatus(
             "Media Manglers helpers",
@@ -564,14 +565,16 @@ class WorkbenchGuiTests(unittest.TestCase):
         window.resources.dependencies = [model, repair]
         window.resources.preflight_complete = True
         window.refresh_dependency_status()
-        with patch.object(
-            QMessageBox,
-            "question",
-            return_value=QMessageBox.StandardButton.Yes,
-        ):
+        # Installer plan, Stage 3: approving is what downloads the model, at once, and only the approved model; a
+        # "No" downloads nothing.
+        with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.No), \
+                patch.object(window, "start_model_download") as download:
             window._dependency_action("whisper_model")
-        self.assertTrue(window.run_settings["whisper_model_download_approved"])
-        self.assertIn("not downloaded", window.dependency_summary.text())
+        download.assert_not_called()
+        with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes), \
+                patch.object(window, "start_model_download") as download:
+            window._dependency_action("whisper_model")
+        download.assert_called_once_with(["medium"])
         with (
             patch.object(QMessageBox, "information") as information,
             patch.object(window, "open_troubleshooting_help") as help_opener,
@@ -602,17 +605,30 @@ class WorkbenchGuiTests(unittest.TestCase):
             DependencyStatus(
                 "Whisper model: medium",
                 "needs_setup",
+                detail="Not on this PC yet. Approve its download (about 1.5 GB) to use it.",
                 required=False,
                 key="whisper_model",
+                model="medium",
             ),
+            DependencyStatus("Whisper model: base.en", "ready", required=False, key="whisper_model_voice",
+                             model="base.en"),
         ]
         window.resources.preflight_complete = True
-        window.run_settings["whisper_model_download_approved"] = False
-        model_blocked = window.validate_current_run()
-        self.assertTrue(any("Approve its explained download" in item for item in model_blocked))
+        window.run_settings["whisper_model"] = "medium"
+        # Installer plan, Stage 3: a model not on this PC blocks the start until its approved download is done;
+        # approving no longer lets the run download it.
         window.run_settings["whisper_model_download_approved"] = True
-        approved = window.validate_current_run()
-        self.assertFalse(any("Approve its explained download" in item for item in approved))
+        model_blocked = window.validate_current_run()
+        self.assertTrue(any("Whisper model medium" in item and "Approve its download" in item
+                            for item in model_blocked))
+        window.resources.dependencies[-2] = replace(window.resources.dependencies[-2], status="ready")
+        ready = window.validate_current_run()
+        self.assertFalse(any("Whisper model" in item for item in ready))
+        # base.en, which every review's voice detection uses, blocks too when it is missing.
+        window.resources.dependencies[-1] = replace(window.resources.dependencies[-1], status="needs_setup",
+                                                    detail="Not on this PC yet.")
+        voice_blocked = window.validate_current_run()
+        self.assertTrue(any("Whisper model base.en" in item for item in voice_blocked))
 
     def test_review_summary_shows_effective_profile_values_and_modified_source(self) -> None:
         window = self._window()

@@ -32,6 +32,7 @@ from tests.test_short_reactions import (  # noqa: E402
     transcribe,
     unload_baseline,
 )
+from tests.whisper_test_models import checked_whisper  # noqa: E402
 
 FFMPEG = shutil.which("ffmpeg")
 
@@ -113,7 +114,7 @@ class WorkUnitsTests(unittest.TestCase):
                    "language_code": "en", "prefer_gpu": True, "narration_speech_mode": "Sparse",
                    "heartbeat_interval_seconds": 60, "progress_file": str(self.root / "progress.json"),
                    "progress_work_units": True}
-        with patch, mock.patch.dict(sys.modules, {"whisper": _GpuWhisper(), "torch": _GpuTorch()}, clear=False):
+        with patch, mock.patch.dict(sys.modules, {"whisper": checked_whisper(_GpuWhisper()), "torch": _GpuTorch()}, clear=False):
             result = whisper_local.transcribe_from_request(request)
         self.assertEqual(result["device"], "cpu")
         seen = [(item["stage"], item.get("device"), (item.get("completed"), item.get("total"))) for item in writes

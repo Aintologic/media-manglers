@@ -8,6 +8,10 @@ line arrives on its input (or after ``--seconds``), printing ``RELEASED``. With 
 until it is ended. With ``--outside`` it is started by a short-lived launcher that ends at once, so it is not a
 child of the test: the app's file helpers must count it as another program, not as the app itself.
 
+With ``--watch-folder`` (installer plan, Stage 2) it behaves like an on-access virus scanner: it watches ``path``,
+a folder, and opens every new file that appears in it (and below it) for ``--hold-ms`` milliseconds with no delete
+sharing, one after another, until it is let go; at the end it prints ``SCANNED <count>``.
+
 ``OutsideHolder`` starts and drives it from a test.
 """
 
@@ -74,6 +78,42 @@ def _hold_lock(path: Path) -> Any:
     return Lock()
 
 
+class _Scanner:
+    """Opens each new file under a folder for a moment, as an on-access scanner does."""
+
+    def __init__(self, folder: Path, hold_ms: int) -> None:
+        self.folder = folder
+        self.hold = max(0, hold_ms) / 1000.0
+        self.seen = {str(path) for path in folder.rglob("*")} if folder.is_dir() else set()
+        self.count = 0
+        self.stop = threading.Event()
+        self.thread = threading.Thread(target=self._watch, daemon=True)
+        self.thread.start()
+
+    def _watch(self) -> None:
+        while not self.stop.is_set():
+            try:
+                found = [path for path in self.folder.rglob("*") if str(path) not in self.seen]
+            except OSError:
+                found = []
+            for path in found:
+                self.seen.add(str(path))
+                if not path.is_file():
+                    continue
+                try:
+                    held = _hold_handle(path)
+                except OSError:
+                    continue  # already moved or removed: a scanner simply misses it
+                self.count += 1
+                time.sleep(self.hold)
+                held.close()
+            time.sleep(0.01)
+
+    def close(self) -> None:
+        self.stop.set()
+        self.thread.join(5)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("path")
@@ -84,6 +124,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--forever", action="store_true")
     parser.add_argument("--seconds", type=float, default=0.0)
     parser.add_argument("--outside", action="store_true")
+    parser.add_argument("--watch-folder", action="store_true")
+    parser.add_argument("--hold-ms", type=int, default=300)
     args = parser.parse_args(argv)
     if args.outside:
         # The launcher: start the holder with this program's own input and output, and end at once.
@@ -92,6 +134,17 @@ def main(argv: list[str] | None = None) -> int:
                          stderr=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
         return 0
     path = Path(args.path)
+    if args.watch_folder:
+        scanner = _Scanner(path, args.hold_ms)
+        print(f"HELD {os.getpid()}", flush=True)
+        if args.seconds > 0:
+            time.sleep(args.seconds)
+        else:
+            sys.stdin.readline()
+        scanner.close()
+        print(f"SCANNED {scanner.count}", flush=True)
+        print("RELEASED", flush=True)
+        return 0
     if args.lock:
         held = _hold_lock(path)
     elif args.folder:
@@ -123,7 +176,7 @@ class OutsideHolder:
 
     def __init__(self, path: Path | str, *, outside: bool = True, folder: bool = False, lock: bool = False,
                  exclusive: bool = False, share_delete: bool = False, forever: bool = False,
-                 seconds: float = 0.0) -> None:
+                 seconds: float = 0.0, watch_folder: bool = False, hold_ms: int = 300) -> None:
         command = [sys.executable, str(HERE), str(path)]
         command += ["--outside"] if outside else []
         command += ["--folder"] if folder else []
@@ -132,6 +185,8 @@ class OutsideHolder:
         command += ["--share-delete"] if share_delete else []
         command += ["--forever"] if forever else []
         command += ["--seconds", str(seconds)] if seconds else []
+        command += ["--watch-folder", "--hold-ms", str(hold_ms)] if watch_folder else []
+        self.scanned = -1
         self.process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
                                         stderr=subprocess.DEVNULL)
         line = self._line(15)
@@ -156,6 +211,10 @@ class OutsideHolder:
         self.process.stdin.write("release\n")
         self.process.stdin.flush()
         line = self._line(15)
+        if line.startswith("SCANNED "):
+            # A watcher reports how many files it opened before it lets go.
+            self.scanned = int(line.split()[1])
+            line = self._line(15)
         if line != "RELEASED":
             raise RuntimeError(f"The holder did not let go: {line!r}")
         self.released = True

@@ -264,6 +264,9 @@ def build_default_settings(repo_root: str = "") -> dict[str, Any]:
             "dependency_ffmpeg_path": "",
             "dependency_ffprobe_path": "",
             "dependency_ytdlp_path": "",
+            # Installer plan, Stage 1: the one-time question about tool paths saved by an earlier version
+            # that differ from the copies bundled with Media Manglers has been answered.
+            "bundled_tools_question_answered": False,
             "whisper_model_download_approved": False,
             "review_inbox_order": "oldest",
             "review_inbox_max_files": 3,

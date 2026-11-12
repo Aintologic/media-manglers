@@ -56,6 +56,7 @@ from tests.test_race_video_prepare import (  # noqa: E402
     _CpuTorch,
     editor_recording,
 )
+from tests.whisper_test_models import checked_whisper  # noqa: E402
 
 FFMPEG = shutil.which("ffmpeg")
 FFPROBE = shutil.which("ffprobe")
@@ -635,7 +636,7 @@ class ReviewKitTranscriptTests(EditorTestCase):
         self.save_settings(whisper_device="CPU", language="de", race_video_quick_whisper_model="medium",
                            whisper_model="large", **{WORDS_KEY: "Brooklands"})
         FakeWhisper.loads, FakeWhisper.heard = [], []
-        with mock.patch.dict(sys.modules, {"whisper": FakeWhisper(), "torch": _CpuTorch()}), \
+        with mock.patch.dict(sys.modules, {"whisper": checked_whisper(FakeWhisper()), "torch": _CpuTorch()}), \
                 mock.patch.object(whisper_local, "transcribe_from_request",
                                   wraps=whisper_local.transcribe_from_request) as helper, \
                 contextlib.redirect_stdout(io.StringIO()):
@@ -717,7 +718,7 @@ class CutPointTests(unittest.TestCase):
 
     def cut_points(self, scenes: list[dict]) -> list[dict]:
         number = add_version(self.project, timeline(self.source, scenes, source_layout=SINGLE), source_duration=30.0)
-        with mock.patch.dict(sys.modules, {"whisper": _WordWhisper()}), \
+        with mock.patch.dict(sys.modules, {"whisper": checked_whisper(_WordWhisper())}), \
                 mock.patch.object(cross_track_check, "ffmpeg_extractor", wraps=cross_track_check.ffmpeg_extractor) as cut:
             result = race_requests.cut_points_from_request({"project": str(self.project), "version": number,
                                                             "ffmpeg": FFMPEG, "whisper_device": "CPU"})

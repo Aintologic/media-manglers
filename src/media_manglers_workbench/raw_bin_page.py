@@ -681,7 +681,8 @@ class RawBinPage(QWidget):
         elif not outcome.get("ok"):
             self._say(f"The {'Deep scan' if kind == 'deep' else 'scan'} did not finish: "
                       f"{outcome.get('error') or 'open it in Queue / Progress for the log'}", "failed")
-        elif kind == "scan" and data.get("status") == "drive_not_reachable":
+        elif kind == "scan" and data.get("status") in {"drive_not_reachable", "model_not_approved"}:
+            # Installer plan, Stage 3: a Whisper model not approved stops the scan once, with what to do.
             self._say(str(data.get("message") or "Recordings drive not reachable."), "attention")
         elif kind == "scan":
             self._say(f"Scan finished: {data.get('files_read', 0)} read, {data.get('unchanged', 0)} unchanged, "
@@ -709,7 +710,7 @@ class RawBinPage(QWidget):
             elif kind == "scan":
                 counts = {key: data.get(key, 0) for key in ("files_seen", "files_read", "unchanged", "in_use",
                                                              "skipped", "failed", "missing_marked")}
-                if data.get("status") == "drive_not_reachable":
+                if data.get("status") in {"drive_not_reachable", "model_not_approved"}:
                     records.finish_run(run_id, "failed", headline=str(data.get("message") or "Drive not reachable."),
                                        reported_by=PAGE_NAME, counts=counts)
                 else:
