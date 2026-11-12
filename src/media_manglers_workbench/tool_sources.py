@@ -136,9 +136,12 @@ DOWNLOAD_STATES = frozenset({"needs_setup", "missing", "update_recommended", "op
 
 
 def needs_download(dependency: object) -> bool:
+    # Installer plan, Stage 4: a row whose way out is Media Manglers' own Set up never also sends the operator to a
+    # tool's install page (pip instructions for another Python).
     return (
         str(getattr(dependency, "key", "") or "") in TOOL_SOURCES
         and str(getattr(dependency, "status", "") or "") in DOWNLOAD_STATES
+        and str(getattr(dependency, "action_kind", "") or "") != "speech_setup"
     )
 
 

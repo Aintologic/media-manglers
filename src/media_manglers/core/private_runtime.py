@@ -13,7 +13,10 @@ a Python already on the PC is never given our files, and our files never go into
 only its own packages, plus our add-ons when it is ours.
 
 Every helper run passes through ``media_manglers.cli.main``, which calls ``use_addons`` first; the readiness
-check's own probe calls it too.
+check's own probe calls it too. Since Stage 4 our Python's own ``Lib\\site-packages`` also holds a start-up hook
+(``ADDONS_HOOK_FILE``), so every process our Python starts gets the add-ons the same way before it runs anything: the
+backend's own Whisper checks, a worker a library starts. The ``._pth`` file stays static, and no other Python has
+the hook.
 """
 
 from __future__ import annotations
@@ -96,6 +99,22 @@ def addons_folder(app: str | os.PathLike[str]) -> Path | None:
 
     set_id = speech_set_id(app)
     return addons_root() / f"sp-{set_id}" if set_id else None
+
+
+# Installer plan, Stage 4: the start-up hook the build puts in our own Python's site-packages. Python runs a line that
+# starts with "import" in a .pth file there when it starts; a hook that fails changes nothing.
+ADDONS_HOOK_FILE = "media_manglers_addons.pth"
+ADDONS_HOOK_LINE = ('import sys; exec("try:\\n from media_manglers.core.private_runtime import use_addons\\n'
+                    ' use_addons()\\nexcept Exception:\\n pass")')
+
+
+def write_addons_hook(site_packages: str | os.PathLike[str]) -> Path:
+    """Write the start-up hook into our own Python's ``site-packages`` (the build does this)."""
+
+    hook = Path(site_packages) / ADDONS_HOOK_FILE
+    hook.write_text("# Media Manglers: its own downloaded speech libraries, for this Python only.\n"
+                    + ADDONS_HOOK_LINE + "\n", encoding="utf-8")
+    return hook
 
 
 def use_addons(executable: str | os.PathLike[str] | None = None, path: list[str] | None = None) -> Path | None:

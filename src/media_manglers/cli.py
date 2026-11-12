@@ -33,6 +33,7 @@ from .core import (
     private_runtime,
     raw_bin_library,
     scratch,
+    speech_setup,
     user_folders,
     zip_writer,
     track_levels,
@@ -224,6 +225,7 @@ def build_parser() -> argparse.ArgumentParser:
         "track-levels",
         "whisper-models",
         "whisper-model-download",
+        "speech-setup",
     ):
         command = subparsers.add_parser(
             name,
@@ -349,6 +351,9 @@ def _build_handlers() -> dict[str, Handler]:
         # the operator approved (only the approval runs it).
         "whisper-models": whisper_models.status_from_request,
         "whisper-model-download": whisper_models.download_from_request,
+        # Installer plan, Stage 4: the shared first-launch setup the operator agreed to (speech libraries for our
+        # own Python, then base.en through the approval path), run in our own Python.
+        "speech-setup": speech_setup.setup_from_request,
     }
 
 

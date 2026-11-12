@@ -7,6 +7,9 @@ name = "media-manglers-core"
 version = "0.0.0"
 description = "Cross-platform Python core helpers for Media Manglers."
 requires-python = ">=3.10"
+# The one shared downloader has Windows (the operating system) check every download's certificate through truststore;
+# Media Manglers' own Python carries it, and a run from the source needs it too.
+dependencies = ["truststore>=0.10"]
 
 [project.optional-dependencies]
 gui = ["PySide6>=6,<7"]

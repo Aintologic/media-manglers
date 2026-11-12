@@ -29,8 +29,10 @@ class DependencyStatus:
     # Where the tool came from, in plain words: "Bundled with Media Manglers", "Downloaded by Media
     # Manglers", "Your chosen path", "Already on this PC" or "Part of Windows" (installer plan, Stage 1).
     found_by: str = ""
-    # For a model row: the Whisper model it is about (Stage 3).
+    # For a model row: the Whisper model it is about (Stage 3), and what the check found: "valid", "missing",
+    # "damaged" or "unknown" ("" when it was not checked).
     model: str = ""
+    model_state: str = ""
 
     @property
     def ready(self) -> bool:

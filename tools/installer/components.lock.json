@@ -1,0 +1,90 @@
+{
+  "purpose": "Every part the build puts in the packaged application folder's runtime folder, pinned by SHA-256. The build fetches each into its own cache (a .partial file, checked, then renamed) and stops on any mismatch. The speech libraries are not here: they are downloaded on the user's PC at first launch (speech-lock.json).",
+  "components": {
+    "python": {
+      "name": "Python 3.12.10 embeddable package (amd64)",
+      "version": "3.12.10",
+      "file": "python-3.12.10-embed-amd64.zip",
+      "url": "https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip",
+      "sha256": "4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3",
+      "size": 11133606,
+      "licence": "PSF-2.0 (with the licences of the software it incorporates)",
+      "source": "https://www.python.org/downloads/release/python-31210/",
+      "stdlib_left_out": ["cgitb.pyc"],
+      "stdlib_left_out_why": "cgitb (a CGI error-page helper, deprecated and removed in Python 3.13) is never used, and its sample file:// address trips the package privacy check."
+    },
+    "ffmpeg": {
+      "name": "FFmpeg 8.1 from FFmpeg-Builds, win64 gpl-shared, the October 2026 month-end build",
+      "version": "n8.1.3-27-g8dca1586f4",
+      "release": "autobuild-2026-10-31-12-59",
+      "file": "ffmpeg-n8.1.3-27-g8dca1586f4-win64-gpl-shared-8.1.zip",
+      "url": "https://github.com/FFmpeg-Builds/FFmpeg-Builds/releases/download/autobuild-2026-10-31-12-59/ffmpeg-n8.1.3-27-g8dca1586f4-win64-gpl-shared-8.1.zip",
+      "sha256": "3adc00b67118a8c4bdd6624a000e139df283b1eeb8b126fcec4849bd5b778dd4",
+      "size": 89702793,
+      "licence": "GPL-3.0-or-later (the build as a whole)",
+      "source": "The complete Corresponding Source is built from the pin list in ffmpeg-source-pins.json (tools/installer/ffmpeg_source_bundle.py) and offered next to each release.",
+      "bin_sha256": {
+        "avcodec-62.dll": "c55a2b35e683ae273d97f6ec46425784c923250a5467864b8e1118a9749c132e",
+        "avdevice-62.dll": "0752e6c6ff708929b869a5023efe0b5db595b1996839d92455c7924eda075c49",
+        "avfilter-11.dll": "cf51c15d1e9377d3ef707558cc3042b82c05dafc5d816129c4ed2f4f60592f88",
+        "avformat-62.dll": "479d4a929b3308e96fff0c14ca265f9d2551d0e268d0f9e228db3b078776096f",
+        "avutil-60.dll": "d8a20f5c11a4058dd2fb4c33bfdb39558470bb3ea8873b82ce958a3cfcdfe8f4",
+        "ffmpeg.exe": "43fa4e2d846b55f300cc808c05fb8d687c45112400923d3b0e983da5f8fc7126",
+        "ffprobe.exe": "021bfb7284fd931d3be1c86a19f154218d35b9f290edd3b03c1017d95308c339",
+        "swresample-6.dll": "b2792b333703ab74e73b7f5814a55f2419c40a0136f0a2e07d5f86d67e275371",
+        "swscale-9.dll": "0a4268a3c134b57f36a5965ff6cbf88c0128d3fdf5449fc8a4375ae3d89f310e"
+      },
+      "left_out": ["ffplay.exe"],
+      "publish_blockers": [
+        "This build links libzvbi, whose src/packet-830.c and src/pdc.c are GPL-2.0-only, into avcodec-62.dll of a GPL-3.0-or-later build; the two cannot be combined. Upstream stopped building zvbi into GPL builds on 2026-11-07 (FFmpeg-Builds commit 162691525a439dbec17f5d01a8d241f134b7516d). Pin a later month-end build before any release."
+      ]
+    },
+    "openai_whisper": {
+      "name": "openai-whisper (source, built into a wheel by the build with no pip and no network)",
+      "version": "20250625",
+      "file": "openai_whisper-20250625.tar.gz",
+      "url": "https://files.pythonhosted.org/packages/35/8e/d36f8880bcf18ec026a55807d02fe4c7357da9f25aebd92f85178000c0dc/openai_whisper-20250625.tar.gz",
+      "sha256": "37a91a3921809d9f44748ffc73c0a55c9f366c85a3ef5c2ae0cc09540432eb96",
+      "size": 803191,
+      "licence": "MIT",
+      "source": "https://github.com/openai/whisper"
+    },
+    "setuptools": {
+      "name": "setuptools (used by the build only, to turn the Whisper source into a wheel; never shipped)",
+      "version": "84.2.1",
+      "file": "setuptools-84.2.1-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/ef/55/6dc6d6bb953bdfc52519a0059592c52b6e3b8ad51cf8256dffceb55b0610/setuptools-84.2.1-py3-none-any.whl",
+      "sha256": "ca140b45d5325a9478f880e351484f62fef15f336462e449ca0c03c873d589c2",
+      "size": 876263,
+      "licence": "MIT",
+      "source": "https://github.com/pypa/setuptools"
+    },
+    "truststore": {
+      "name": "truststore (checks download certificates through Windows' own certificate verification)",
+      "version": "0.10.5",
+      "file": "truststore-0.10.5-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/51/e9/3a7820be2bb0fe53b6bc9c3be26d3d1158004e4c3ab953aa6840b955b1e9/truststore-0.10.5-py3-none-any.whl",
+      "sha256": "9aaaedaefaf06d8b206278cf8b5012bc897f485a874503501e12d776df78951c",
+      "size": 19017,
+      "licence": "MIT",
+      "source": "https://github.com/sethmlarson/truststore"
+    },
+    "vc_runtime": {
+      "name": "Microsoft Visual C++ runtime, placed beside our own Python",
+      "version": "14.51.36247.0",
+      "licence": "Microsoft Visual Studio redistributable files terms",
+      "source": "Microsoft-signed files installed by Microsoft's Visual C++ redistributable; the build takes them from its own cache, or from the build PC's System32, and accepts each only when its SHA-256 matches the pin below and its signature is valid and Microsoft's.",
+      "files": {
+        "msvcp140.dll": "7c26614e1d733892c2deac7e245ce115504b1d80592dd0a01b08e3e5a55f89ca",
+        "msvcp140_1.dll": "206c931bf90fdad8816de3b5e2ef80b2bcaa9406c89ecc05fe6fddffe251e982",
+        "msvcp140_2.dll": "d50d7883f20d1dc6191768d3746f52dd9cac89c346ffaed5be1f110c2f34a838",
+        "msvcp140_atomic_wait.dll": "3d0cbfaa1bf3eecf5a3f4491d2960ee803cb994f30292c6adc4a07c498f60e2b",
+        "msvcp140_codecvt_ids.dll": "8a65c7596ef2e6938731f5a1058e7e40145b6d97967cc649231a076b9a608d78",
+        "vcruntime140.dll": "d1f4225df2cd877dbf130d5668a021dce3f94118455ff5ec952061c30afc9ce7",
+        "vcruntime140_1.dll": "a7146c08f89fe5b04541ab507cdb59ff7b44534d4ba3c668a426c6450a03434e",
+        "vcruntime140_threads.dll": "40f39e8cee5f5a531b4010e18b807e8fe265b908dc58f959ecb7ebc6ea6cb11a",
+        "concrt140.dll": "54716f0738af891f283d213b5c8d11b25896bb8ee3097d301eae718560cf974e"
+      }
+    }
+  }
+}

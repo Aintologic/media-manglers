@@ -266,6 +266,7 @@ class EveryFeaturePathTests(ModelCase):
                                  detail="Not on this PC yet.")]
         fake = types.SimpleNamespace(runner_thread=None, resources=types.SimpleNamespace(dependencies=rows))
         fake.model_blockers = lambda models: WorkbenchWindow.model_blockers(fake, models)
+        fake.speech_blockers = lambda: []  # speech recognition is set up (Stage 4 has its own test)
         from media_manglers_workbench import app as app_module
         with mock.patch.object(app_module, "warn") as warned:
             started = WorkbenchWindow.start_external_run(fake, mock.Mock(), title="Find my bug reports",

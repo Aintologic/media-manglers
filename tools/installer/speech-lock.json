@@ -1,0 +1,220 @@
+{
+  "purpose": "Speech libraries for Media Manglers' own Python 3.12.10 (cp312, win_amd64). Downloaded on the user's PC at first launch, after one question; never shipped. Pinned by SHA-256; unpacked by speech_setup, not pip.",
+  "set_id": "f5172624",
+  "python": "cp312",
+  "platform": "win_amd64",
+  "total_bytes": 196521225,
+  "skip_on_unpack": [
+    "torch/bin/protoc.exe",
+    "torch/bin/protoc-*"
+  ],
+  "files": [
+    {
+      "name": "certifi",
+      "version": "2026.10.23",
+      "file": "certifi-2026.10.23-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/32/d1/a3652fe2c19134d0d15922177821d863cbd7e842d53a21bbe7e8e3a1b5ac/certifi-2026.10.23-py3-none-any.whl",
+      "sha256": "e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1",
+      "size": 135082,
+      "licence": "MPL-2.0"
+    },
+    {
+      "name": "charset-normalizer",
+      "version": "3.5.2",
+      "file": "charset_normalizer-3.5.2-cp312-cp312-win_amd64.whl",
+      "url": "https://files.pythonhosted.org/packages/eb/e6/e6e083884cbcfd49c64865af05027fe7011be7b2d9179524f099a1b611f3/charset_normalizer-3.5.2-cp312-cp312-win_amd64.whl",
+      "sha256": "780fbe7cab297b81dad9fb8dc5eb003c0468ffb0d9e5f65068c53a34661a96bc",
+      "size": 207486,
+      "licence": "MIT"
+    },
+    {
+      "name": "colorama",
+      "version": "0.4.6",
+      "file": "colorama-0.4.6-py2.py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl",
+      "sha256": "4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6",
+      "size": 25335,
+      "licence": "BSD-3-Clause"
+    },
+    {
+      "name": "filelock",
+      "version": "4.2.10",
+      "file": "filelock-4.2.10-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/ef/90/5d0096a325aa0f83ba7a3968bfb485b67e32c947bdf9cd0fcb4b485be718/filelock-4.2.10-py3-none-any.whl",
+      "sha256": "9479aaeb4db20b5a53e3da28493edd24720b66b8a0b84030aa56ccdf243d6857",
+      "size": 218040,
+      "licence": "MIT"
+    },
+    {
+      "name": "fsspec",
+      "version": "2026.9.0",
+      "file": "fsspec-2026.9.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/6c/c0/a98505f18594f1bce828bb159cec0fcf9860562f1a2c85913409fc8f3d9e/fsspec-2026.9.0-py3-none-any.whl",
+      "sha256": "8dd6e646e99ea382bd85f97a45e6b526a442d79423a7dc673f1e2756d05fcb5f",
+      "size": 221738,
+      "licence": "BSD-3-Clause"
+    },
+    {
+      "name": "idna",
+      "version": "3.20",
+      "file": "idna-3.20-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/58/a2/bb081bab032533a855d44de1d56f8e8426114ff1ba5d1f07a438a0a654f8/idna-3.20-py3-none-any.whl",
+      "sha256": "ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c",
+      "size": 69583,
+      "licence": "BSD-3-Clause"
+    },
+    {
+      "name": "Jinja2",
+      "version": "3.1.6",
+      "file": "jinja2-3.1.6-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/62/a1/3d680cbfd5f4b8f15abc1d571870c5fc3e594bb582bc3b64ea099db13e56/jinja2-3.1.6-py3-none-any.whl",
+      "sha256": "85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67",
+      "size": 134899,
+      "licence": "BSD-3-Clause"
+    },
+    {
+      "name": "llvmlite",
+      "version": "0.50.0",
+      "file": "llvmlite-0.50.0-cp312-cp312-win_amd64.whl",
+      "url": "https://files.pythonhosted.org/packages/64/70/f395702c20b514363061055b5bdebe3513e544139e6d412a5c86e8ea0b30/llvmlite-0.50.0-cp312-cp312-win_amd64.whl",
+      "sha256": "c20595cc3a76e3c85140fdafbf9246c732ddf8e0e646ba2f4e4881f87567300d",
+      "size": 41865553,
+      "licence": "BSD-2-Clause AND Apache-2.0 WITH LLVM-exception"
+    },
+    {
+      "name": "MarkupSafe",
+      "version": "3.0.4",
+      "file": "markupsafe-3.0.4-cp312-cp312-win_amd64.whl",
+      "url": "https://files.pythonhosted.org/packages/3f/bf/62495e180b7000aaf30000fff849e933f74264638057176cf46852500adc/markupsafe-3.0.4-cp312-cp312-win_amd64.whl",
+      "sha256": "11935df9bf455ed0c04eb87bcd720f02b1fe5e02128a9430f23aed6f93336fc7",
+      "size": 14303,
+      "licence": "BSD-3-Clause"
+    },
+    {
+      "name": "more-itertools",
+      "version": "11.2.1",
+      "file": "more_itertools-11.2.1-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/5d/57/3c4b1c6f2e0cc29ba023802458ea3d2a996f87085559e4a5f2192d549532/more_itertools-11.2.1-py3-none-any.whl",
+      "sha256": "35a7377edd1dd6608dcb2cdf534ded55ea32d49448875ad042cd3f879fb1ded0",
+      "size": 74405,
+      "licence": "MIT"
+    },
+    {
+      "name": "mpmath",
+      "version": "1.3.0",
+      "file": "mpmath-1.3.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/43/e3/7d92a15f894aa0c9c4b49b8ee9ac9850d6e63b03c9c32c0367a13ae62209/mpmath-1.3.0-py3-none-any.whl",
+      "sha256": "a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c",
+      "size": 536198,
+      "licence": "BSD-3-Clause"
+    },
+    {
+      "name": "networkx",
+      "version": "3.7",
+      "file": "networkx-3.7-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/7e/cd/fe58041e9011f307c490e3e17dd48cc516448f7c698a3f2d9d9d65d7e6a8/networkx-3.7-py3-none-any.whl",
+      "sha256": "e3fd2c13a7814cee3746340d8d7f8598a67f16a58bf47fb7f8793fab6efca1b0",
+      "size": 2142205,
+      "licence": "BSD-3-Clause"
+    },
+    {
+      "name": "numba",
+      "version": "0.68.1",
+      "file": "numba-0.68.1-cp312-cp312-win_amd64.whl",
+      "url": "https://files.pythonhosted.org/packages/e9/bb/c9b0129a57e82b97befeca60a53289359653eef33dd3bffd840898fa33aa/numba-0.68.1-cp312-cp312-win_amd64.whl",
+      "sha256": "6d115039768cc2eb3cc99b32355ca507e1bbc653eca5492c83ab6399f218df27",
+      "size": 2832823,
+      "licence": "BSD-2-Clause"
+    },
+    {
+      "name": "numpy",
+      "version": "2.5.4",
+      "file": "numpy-2.5.4-cp312-cp312-win_amd64.whl",
+      "url": "https://files.pythonhosted.org/packages/12/33/fefe62073dc8acfd0f2b9ed7c003af2f50aa61555e113e6db02b8f79f145/numpy-2.5.4-cp312-cp312-win_amd64.whl",
+      "sha256": "a7b1b6353e36a7e50de2973a38d705c88ee93adcf120673cee7f45a4a3fa223a",
+      "size": 12573091,
+      "licence": "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0"
+    },
+    {
+      "name": "regex",
+      "version": "2026.11.9",
+      "file": "regex-2026.11.9-cp312-cp312-win_amd64.whl",
+      "url": "https://files.pythonhosted.org/packages/c1/ef/e03271355a802f38f7510e31e006667fc8b95b771058d75a36e2afda61b2/regex-2026.11.9-cp312-cp312-win_amd64.whl",
+      "sha256": "ae42ad9825cde4cd374abfce6bc82233b91099170c138b349554813e97da5100",
+      "size": 280891,
+      "licence": "Apache-2.0 AND CNRI-Python"
+    },
+    {
+      "name": "requests",
+      "version": "2.34.2",
+      "file": "requests-2.34.2-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/a0/f4/c67b0b3f1b9245e8d266f0f112c500d50e5b4e83cb6f3b71b6528104182a/requests-2.34.2-py3-none-any.whl",
+      "sha256": "2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0",
+      "size": 73075,
+      "licence": "Apache-2.0"
+    },
+    {
+      "name": "setuptools",
+      "version": "84.2.1",
+      "file": "setuptools-84.2.1-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/ef/55/6dc6d6bb953bdfc52519a0059592c52b6e3b8ad51cf8256dffceb55b0610/setuptools-84.2.1-py3-none-any.whl",
+      "sha256": "ca140b45d5325a9478f880e351484f62fef15f336462e449ca0c03c873d589c2",
+      "size": 876263,
+      "licence": "MIT"
+    },
+    {
+      "name": "sympy",
+      "version": "1.14.0",
+      "file": "sympy-1.14.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl",
+      "sha256": "e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5",
+      "size": 6299353,
+      "licence": "BSD-3-Clause"
+    },
+    {
+      "name": "tiktoken",
+      "version": "0.14.0",
+      "file": "tiktoken-0.14.0-cp312-cp312-win_amd64.whl",
+      "url": "https://files.pythonhosted.org/packages/bd/bd/a2e884fb1402cba5be08836590320012b2d8ada0e2eef9911a64df4bcd2d/tiktoken-0.14.0-cp312-cp312-win_amd64.whl",
+      "sha256": "087538c080e5ff421abd3a0785ed63c5111d06af98e6cd0d374dbe5969147ca3",
+      "size": 941208,
+      "licence": "MIT"
+    },
+    {
+      "name": "torch",
+      "version": "2.15.0",
+      "file": "torch-2.15.0-cp312-cp312-win_amd64.whl",
+      "url": "https://files.pythonhosted.org/packages/74/0b/a57c0b58a64b7a197dc40fc464bb96c0de867f95a2b1cbb3ec9e54414fde/torch-2.15.0-cp312-cp312-win_amd64.whl",
+      "sha256": "f2bd0a3709a7493a6ef2ac5a654111242a854439f7558f910b6b653b56f7504d",
+      "size": 126738207,
+      "licence": "BSD-3-Clause AND Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSL-1.0 AND ISC AND MIT AND Zlib"
+    },
+    {
+      "name": "tqdm",
+      "version": "4.70.1",
+      "file": "tqdm-4.70.1-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/a7/03/921a3d3c75785aca9ebfbfcabfbc3a1be12e2ab5265deb026d55a5a3f83e/tqdm-4.70.1-py3-none-any.whl",
+      "sha256": "c293e525e6fef9c20e8728fd4612df02a0aa31bb5fe91ecd93e123b1b7bffa73",
+      "size": 80199,
+      "licence": "MPL-2.0 AND MIT"
+    },
+    {
+      "name": "typing_extensions",
+      "version": "4.16.0",
+      "file": "typing_extensions-4.16.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl",
+      "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
+      "size": 45571,
+      "licence": "PSF-2.0"
+    },
+    {
+      "name": "urllib3",
+      "version": "2.8.0",
+      "file": "urllib3-2.8.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/92/9d/c4e665119135114480843e7ab388fa94d8480650450e6f8e26b70d323a4c/urllib3-2.8.0-py3-none-any.whl",
+      "sha256": "0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3",
+      "size": 135717,
+      "licence": "MIT"
+    }
+  ]
+}

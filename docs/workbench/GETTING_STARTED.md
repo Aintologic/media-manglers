@@ -8,6 +8,11 @@
    executable away from its Help, engine, and runtime sidecars.
 4. Let the Workbench check readiness automatically. Open **Settings >
    Dependencies** only when it names a repair or update action.
+5. When a copy that comes with its own tools starts for the first time, it asks
+   once whether to download its speech-recognition files (about 0.34 GB, into
+   your user folder). Choose **Download** to make transcripts; a bar at the top
+   of the window shows the progress. See
+   [First launch](DEPENDENCIES_SETUP.md#first-launch-setting-up-speech-recognition).
 
 The Workbench reads source media without modifying it. New review artifacts are
 written only under the output folder you select.

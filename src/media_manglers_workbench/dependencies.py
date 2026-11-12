@@ -14,6 +14,7 @@ import threading
 import time
 from typing import Callable
 
+from media_manglers.core import speech_setup
 from media_manglers.core.user_folders import addons_root
 
 from .play_targets import find_vlc
@@ -397,8 +398,55 @@ def _model_row(key: str, model: str, purpose: str, state: dict[str, object], *, 
         checked_at=checked_at,
         found_by=FOUND_ON_PC if found == "valid" else "",
         model=model,
+        model_state=found,
         **actions,
     )
+
+
+# Installer plan, Stage 4: the speech libraries Media Manglers' own Python needs, downloaded once by the shared
+# first-launch setup into addons_root(), after the one question the app asks.
+SPEECH_ROW = "speech_libraries"
+SPEECH_SET_UP = {"action_label": "Set up", "action_kind": "speech_setup"}
+
+
+def speech_not_set_up_text(library_bytes: int) -> str:
+    return (f"Speech recognition is not set up yet. Choose Set up to download its files (about "
+            f"{library_bytes / 1_000_000_000:.2f} GB, once, into your user folder); nothing downloads until you agree.")
+
+
+def _speech_row(*, lock: speech_setup.SpeechLock, ready: bool, uses_ours: bool, selected_path: str, kept_note: str,
+                checked_at: str, loads: bool = True, error: str = "") -> DependencyStatus:
+    """The Speech recognition row. ``loads`` is whether Whisper and PyTorch import in the Python in use."""
+
+    purpose = "The speech libraries (PyTorch and its partners) Media Manglers' own Python uses for transcripts."
+    if not selected_path:
+        return _dependency(SPEECH_ROW, "Speech recognition", purpose, "not_checked", required=False,
+                           detail="Not checked: no Python started. Fix the Python row, then Refresh readiness.",
+                           checked_at=checked_at)
+    if not uses_ours:
+        if loads:
+            reason = kept_note.rstrip(".") if kept_note else "Your Python is used"
+            return _dependency(SPEECH_ROW, "Speech recognition", purpose, "ready", path=selected_path, required=False,
+                               detail=f"Not needed: {reason}, and it has its own speech libraries, so nothing is "
+                                      "downloaded for it.", checked_at=checked_at, found_by=FOUND_ON_PC)
+        return _dependency(SPEECH_ROW, "Speech recognition", purpose, "optional", path=selected_path, required=False,
+                           detail="Not used: the Python in use is not Media Manglers' own, so its speech libraries are "
+                                  "not given to it. The Local Whisper and PyTorch rows say what that Python lacks.",
+                           checked_at=checked_at, found_by=FOUND_ON_PC)
+    folder = speech_setup.set_folder(lock.set_id)
+    if ready and loads:
+        return _dependency(SPEECH_ROW, "Speech recognition", purpose, "ready", path=str(folder), required=False,
+                           detail="Set up: downloaded by Media Manglers into your user folder, and used only by its "
+                                  "own Python.", checked_at=checked_at, found_by=FOUND_DOWNLOADED)
+    if ready:
+        # The set is there but does not load: part of it was removed or quarantined. Set up builds it again.
+        return _dependency(SPEECH_ROW, "Speech recognition", purpose, "needs_setup", path=str(folder), required=False,
+                           detail="The speech libraries in your user folder are there but no longer load, so "
+                                  "transcripts cannot be made. Choose Set up to download and set them up again. "
+                                  f"({error or 'Whisper or PyTorch did not import'})",
+                           checked_at=checked_at, found_by=FOUND_DOWNLOADED, model_state="damaged", **SPEECH_SET_UP)
+    return _dependency(SPEECH_ROW, "Speech recognition", purpose, "needs_setup", path=str(folder), required=False,
+                       detail=speech_not_set_up_text(lock.total_bytes), checked_at=checked_at, **SPEECH_SET_UP)
 
 
 def _probe_python_candidate(
@@ -530,6 +578,7 @@ def _dependency(
     checked_at: str = "",
     found_by: str = "",
     model: str = "",
+    model_state: str = "",
 ) -> DependencyStatus:
     return DependencyStatus(
         name=name,
@@ -545,6 +594,7 @@ def _dependency(
         last_checked=checked_at,
         found_by=found_by,
         model=model,
+        model_state=model_state,
     )
 
 
@@ -777,6 +827,30 @@ def run_dependency_preflight(
         )
     )
 
+    # Installer plan, Stage 4: our own Python's speech libraries come from the first-launch setup. Until it has run,
+    # every Whisper row points to Set up rather than to an install guide; a Python of yours needs none of it.
+    app_folder = Path(bundled_dir).parent if bundled_dir else None
+    speech_lock = (speech_setup.read_lock(app_folder)
+                   if app_folder is not None and private_python and Path(private_python).is_file() else None)
+    speech_ready = speech_lock is not None and speech_setup.libraries_ready(app_folder)
+    speech_loads = bool(selected_probe.get("whisper_import_ok") and selected_probe.get("torch_import_ok"))
+    # Not set up, or set up but no longer loading in our own Python: either way Set up is the way out.
+    speech_missing = speech_lock is not None and uses_ours and not (speech_ready and speech_loads)
+    if speech_lock is not None:
+        dependencies.append(_speech_row(lock=speech_lock, ready=speech_ready, uses_ours=uses_ours,
+                                        selected_path=selected_path if python_ready else "", kept_note=kept_note,
+                                        checked_at=timestamp, loads=speech_loads,
+                                        error=str(selected_probe.get("error") or "")))
+
+    speech_text = ("" if speech_lock is None else speech_not_set_up_text(speech_lock.total_bytes) if not speech_ready
+                   else "Media Manglers' own speech libraries no longer load. Choose Set up on the Speech recognition "
+                        "row to set them up again.")
+
+    def guide_or_set_up(ready: bool, guide: dict[str, str]) -> dict[str, str]:
+        if ready:
+            return {"action_label": "", "action_kind": ""}
+        return SPEECH_SET_UP if speech_missing else guide
+
     whisper_ready = bool(selected_probe.get("whisper_import_ok"))
     dependencies.append(
         _dependency(
@@ -789,13 +863,13 @@ def run_dependency_preflight(
             detail=(
                 "Whisper imported in the same Python runtime the Workbench will pass to the backend."
                 if whisper_ready
+                else speech_text if speech_missing
                 else str(selected_probe.get("error") or "Whisper is not installed in the selected runtime.")
             ),
             required=False,
-            action_label="Install guide" if not whisper_ready else "",
-            action_kind="install_guide" if not whisper_ready else "",
             checked_at=timestamp,
             found_by=(FOUND_BUNDLED if uses_ours else FOUND_ON_PC) if whisper_ready else "",
+            **guide_or_set_up(whisper_ready, {"action_label": "Install guide", "action_kind": "install_guide"}),
         )
     )
     # Installer plan, Stage 3: one row per model a workflow will load, each checked against the file Whisper
@@ -826,11 +900,11 @@ def run_dependency_preflight(
             "ready" if torch_ready else "needs_setup",
             path=selected_path,
             version=str(selected_probe.get("torch_version") or ""),
-            detail=str(selected_probe.get("error") or "PyTorch imported successfully."),
+            detail=(speech_text if speech_missing
+                    else str(selected_probe.get("error") or "PyTorch imported successfully.")),
             required=False,
-            action_label="Install guide" if not torch_ready else "",
-            action_kind="install_guide" if not torch_ready else "",
             checked_at=timestamp,
+            **guide_or_set_up(torch_ready, {"action_label": "Install guide", "action_kind": "install_guide"}),
             found_by=(
                 found_by_text(str(selected_probe.get("torch_path") or ""), bundled_dir=bundled_dir or None,
                               downloaded_dir=addons_root())
@@ -872,9 +946,8 @@ def run_dependency_preflight(
                 else "CPU fallback needs both Whisper and PyTorch in the selected runtime."
             ),
             required=False,
-            action_label="Repair" if not cpu_ready else "",
-            action_kind="repair_runtime" if not cpu_ready else "",
             checked_at=timestamp,
+            **guide_or_set_up(cpu_ready, {"action_label": "Repair", "action_kind": "repair_runtime"}),
         )
     )
     # 188: VLC is optional (the built-in player needs nothing). It is only looked for, the same

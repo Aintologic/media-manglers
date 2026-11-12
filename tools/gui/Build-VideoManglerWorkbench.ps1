@@ -633,6 +633,9 @@ try {
     Copy-PythonBackendSidecar -DestinationRoot $targetRoot
     Assert-PythonBackendSidecarImports -BuildPython $buildPython -PackageRoot $targetRoot
     Set-PackagedBackendNeutralBytecode -BuildPython $buildPython -PackageRoot $targetRoot
+    # Installer plan, Stages 4 and 5: Media Manglers' own Python and FFmpeg, every part pinned by SHA-256 in
+    # tools\installer\components.lock.json, in the packaged application folder's runtime folder.
+    & (Join-Path $repoRoot "tools\installer\Build-PackagedRuntime.ps1") -PackageRoot $targetRoot -BuildPython $buildPython -CacheRoot (Join-Path $BuildRoot "components")
     $glossariesSource = Join-Path $repoRoot "glossaries"
     if (Test-Path -LiteralPath $glossariesSource -PathType Container) {
         Copy-Item -LiteralPath $glossariesSource -Destination (Join-Path $targetRoot "glossaries") -Recurse -Force
@@ -747,7 +750,7 @@ try {
     Write-Host "Executable: $targetExe" -ForegroundColor Green
     Write-Host ("File version: {0}; Product version: {1}" -f $versionInfo.FileVersion, $versionInfo.ProductVersion) -ForegroundColor Green
     Write-Host ("Build identity: v{0} | PACKAGED | {1}{2}" -f $semanticVersion, $(if ($shortGitCommit) { $shortGitCommit } else { "UNKNOWN" }), $(if ($dirtyBuild -eq $true) { " | DIRTY" } else { "" })) -ForegroundColor Green
-    Write-Host "Backend sidecars: Video Mangler.ps1, python-core, glossaries" -ForegroundColor Green
+    Write-Host "Backend sidecars: Video Mangler.ps1, python-core, glossaries, runtime (our own Python and FFmpeg)" -ForegroundColor Green
 }
 finally {
     $env:MEDIA_MANGLERS_BUILD_IDENTITY_PATH = $oldBuildIdentityPath

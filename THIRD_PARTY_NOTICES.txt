@@ -39,7 +39,8 @@ Bundled with the packaged Workbench
 -----------------------------------
 
 This section applies only to the packaged Workbench folder: the folder that
-holds VideoManglerWorkbench.exe and its _internal folder. The Video Mangler and
+holds VideoManglerWorkbench.exe, its _internal folder and its runtime folder.
+The Video Mangler and
 Audio Mangler scripts, and their release ZIPs, bundle none of these. The
 licence texts named below are in the licenses folder beside
 VideoManglerWorkbench.exe.
@@ -73,8 +74,7 @@ VideoManglerWorkbench.exe.
    - Text: licenses\LGPL-2.1.txt. They link zlib 1.3.1: licenses\zlib.txt.
    - Source: https://ffmpeg.org/releases/ffmpeg-7.1.3.tar.xz
    - These libraries are not the ffmpeg.exe and ffprobe.exe programs that the
-     reviews use. Those are installed separately (see "Optional tooling and
-     services" above) and are not part of the package.
+     reviews use. Those are a separate FFmpeg build in runtime\ffmpeg (item 6).
 
 3. The Python 3.12.10 runtime: python312.dll, python3.dll and the standard
    library, with SQLite 3.49.1 (sqlite3.dll), OpenSSL 3.0.16 (libcrypto-3.dll),
@@ -99,6 +99,79 @@ VideoManglerWorkbench.exe.
    - Licence: GNU General Public License version 2 or later, with the
      PyInstaller bootloader exception, which allows programs built with it to
      be distributed under any licence. Text: licenses\PyInstaller-COPYING.txt.
+
+Media Manglers' own tools, in the runtime folder of the packaged Workbench:
+
+6. FFmpeg n8.1.3-27-g8dca1586f4 (the 8.1 branch), as built by the
+   FFmpeg-Builds project: the win64 gpl-shared build from release
+   autobuild-2026-10-31-12-59, file
+   ffmpeg-n8.1.3-27-g8dca1586f4-win64-gpl-shared-8.1.zip. The programs
+   ffmpeg.exe and ffprobe.exe and the libraries beside them are in
+   runtime\ffmpeg\bin, unchanged; ffplay is left out.
+   - Licence: the build as a whole is under the GNU General Public License,
+     version 3 or later (it includes libx264 and other GPL libraries). Texts:
+     runtime\ffmpeg\LICENSE.txt (also licenses\FFmpeg-LICENSE.txt) and
+     licenses\GPL-3.0.txt.
+   - Source: the complete Corresponding Source of these files (FFmpeg and
+     every library built into them, at the exact versions used, with the
+     FFmpeg-Builds scripts that built them), and an unchanged copy of the file
+     named above, are offered next to each Media Manglers release that includes
+     them, for as long as that release is offered. runtime\ffmpeg\README.txt
+     says the same. The pin list it is built from is in
+     tools\installer\ffmpeg-source-pins.json in this repository.
+   - Known problem with this particular build, found by checking its sources:
+     it links libzvbi, two of whose files are licensed GPL-2.0-only, into a
+     GPL-3.0-or-later build, and those two licences cannot be combined. The
+     FFmpeg-Builds project stopped building libzvbi into its GPL builds a week
+     later. This build is therefore used for testing only, and is replaced by a
+     later build without libzvbi before any release.
+
+7. Python 3.12.10, the embeddable package for 64-bit Windows, in
+   runtime\python: our own Python, which runs the helpers and Whisper. Same
+   licence and incorporated software as item 3; its own copy of the licence is
+   runtime\python\LICENSE.txt. One unused standard-library module, cgitb (a
+   web error-page helper, removed in Python 3.13), is left out of its
+   python312.zip; nothing else is changed.
+
+8. The Microsoft Visual C++ runtime 14.51.36247 (msvcp140*.dll,
+   vcruntime140*.dll and concrt140.dll) beside runtime\python\python.exe,
+   unchanged, as Microsoft's redistributable installs them.
+   - Licence: the Microsoft Visual Studio redistributable files terms.
+
+9. In runtime\python\Lib\site-packages:
+   - openai-whisper 20250625 (the Whisper program code, without any model),
+     built unchanged from its published source. Licence: MIT. Text:
+     licenses\openai-whisper-MIT.txt. Source: https://github.com/openai/whisper
+   - truststore 0.10.5, which has Windows check the certificate of every
+     download. Licence: MIT. Text: licenses\truststore-MIT.txt. Source:
+     https://github.com/sethmlarson/truststore
+
+Downloaded on your PC, not shipped
+----------------------------------
+
+After you agree at first launch, Media Manglers downloads the speech libraries
+its own Python needs, from the Python Package Index, into your user folder
+(%LOCALAPPDATA%\MediaManglers\addons). They come from their publishers, each
+with its own licence file inside it; Media Manglers does not distribute them.
+The exact files and checksums are in tools\installer\speech-lock.json:
+
+- PyTorch (torch) 2.15.0 for the processor: BSD-3-Clause, with the licences of
+  the software it includes (Apache-2.0, BSD-2-Clause, BSL-1.0, ISC, MIT, Zlib).
+- numpy 2.5.4: BSD-3-Clause, with 0BSD, MIT, Zlib and CC0-1.0 parts.
+- numba 0.68.1: BSD-2-Clause. llvmlite 0.50.0: BSD-2-Clause and Apache-2.0
+  with the LLVM exception.
+- tiktoken 0.14.0: MIT. regex 2026.11.9: Apache-2.0 and CNRI-Python.
+- requests 2.34.2: Apache-2.0. urllib3 2.8.0: MIT. idna 3.20: BSD-3-Clause.
+  charset-normalizer 3.5.2: MIT. certifi 2026.10.23: MPL-2.0.
+- tqdm 4.70.1: MPL-2.0 and MIT. more-itertools 11.2.1: MIT.
+- sympy 1.14.0 and mpmath 1.3.0: BSD-3-Clause. networkx 3.7: BSD-3-Clause.
+- filelock 4.2.10: MIT. fsspec 2026.9.0: BSD-3-Clause. Jinja2 3.1.6 and
+  MarkupSafe 3.0.4: BSD-3-Clause. typing_extensions 4.16.0: PSF-2.0.
+  colorama 0.4.6: BSD-3-Clause. setuptools 84.2.1: MIT.
+
+Whisper models (base.en at first launch, any other only after you approve it)
+are downloaded from OpenAI's model server into the Whisper model cache in your
+user folder. Licence: MIT.
 
 Replacing the LGPL libraries:
 
