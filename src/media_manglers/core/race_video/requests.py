@@ -30,7 +30,7 @@ import time
 from typing import Any, Callable
 
 from .. import (cross_track_check, frame_render, recording_records, sparse_narration, speech_facts, voice_track,
-                whisper_options)
+                whisper_models, whisper_options)
 from ..scratch import scratch_root
 from ..spelling_words import SETTING_KEY as SPELLING_WORDS_KEY
 from ..user_folders import temporary_folder_problem
@@ -968,6 +968,27 @@ def _check_narration(json_path: Path, *, source: Path, voice: int, compared: lis
     return result
 
 
+def _models_to_load(*, main: str, quick: str, find_voice: bool, write_narration: bool, compare: bool,
+                    listen: bool) -> list[str]:
+    """The Whisper models the rest of a Prepare loads, each only for a step it runs (installer plan, Stage 3, review
+    M4): the quick passes' model to find the voice by listening and to hear other voices on the game track, the main
+    model to write the narration down, and base.en to check its lines against the other tracks, when there are any."""
+
+    models = [quick] if find_voice else []
+    if write_narration:
+        models += [main, CROSS_CHECK_MODEL] if compare else [main]
+    return models + ([quick] if listen else [])
+
+
+
+
+def _may_match(stored: Any, expected: dict[str, Any], unknown: set[str]) -> bool:
+    """Whether a stored stamp is ``expected``, or can still turn out to be once the parts in ``unknown`` are known."""
+
+    return (isinstance(stored, dict) and set(stored) == set(expected)
+            and all(stored[key] == value for key, value in expected.items() if key not in unknown))
+
+
 def prepare_from_request(payload: dict[str, Any]) -> dict[str, Any]:
     """Everything the AI editor needs before it starts, in one run: the project, the narration's
     words, and the analysis. Each step says what it is doing on its own line, for the run's log.
@@ -994,6 +1015,12 @@ def prepare_from_request(payload: dict[str, Any]) -> dict[str, Any]:
     A voice or game track with no sound for the whole recording is used as chosen, with a plain warning
     in the run's log, at the top of the digest and in the result's ``warnings``
     (``analysis.silent_track_warnings``).
+
+    Installer plan, Stage 3 (review M4): every Whisper model the run will load (the main model, base.en for the
+    cross-track check, the quick passes' model) is checked before the recording is read and before a new project
+    folder is made, so a model not approved stops it at once with what to do. Only a model the run is sure to load
+    is checked then; what only the read can tell (the tracks found by listening, a stored narration that may still
+    fit) is checked again once it has, before the narration is written down.
     """
 
     remove_scratch_leftovers()
@@ -1056,10 +1083,8 @@ def prepare_from_request(payload: dict[str, Any]) -> dict[str, Any]:
                    "avg_frame_rate": str(video.get("frame_rate_text") or ""),
                    "r_frame_rate": str(video.get("r_frame_rate_text") or "")}
         masks = _masks(payload)
-        phases, recording = _bind_at_prepare(payload, run, source)
-        project = run.create(recording)
-        print(f"Project: {project}", flush=True)
-        folder = project / "analysis" / "transcript"
+        # The project's folder, made or not (``run.create`` makes this one): what it stores decides what this run does.
+        folder = run.folder / "analysis" / "transcript"
         transcript = folder / NARRATION_NAMES["json_name"]
         game_speech = folder / "game.speech.json"
 
@@ -1082,10 +1107,36 @@ def prepare_from_request(payload: dict[str, Any]) -> dict[str, Any]:
             tracks = {"voice": voice, "game": game, "voice_decided_by": voice_by, "game_decided_by": game_by}
             have_words, have_heard = stored_steps(_compared_tracks(known, voice, game, {int(o) for o in sounding_stored}))
             if ((skip_transcript or have_words) and (not listen_for_voices or have_heard)
-                    and analysis_is_current(project, budget=budget, tracks=tracks, layout=layout, story_panel=story_panel,
-                                            masks=masks, transcript=transcript if have_words else None,
+                    and analysis_is_current(run.folder, budget=budget, tracks=tracks, layout=layout,
+                                            story_panel=story_panel, masks=masks,
+                                            transcript=transcript if have_words else None,
                                             game_speech=game_speech if have_heard else None)):
                 reuse = (have_words, have_heard)
+        if reuse is None and not skip_transcript:
+            # Stage 3 (review M4): the models this run is sure to load, before anything is read or made. The tracks the
+            # narration is checked against come from the stored sounding (else every track counts as having sound).
+            # While a track is still to be found by the read, a stored narration or stored other voices that may still
+            # fit are counted as kept (the check after the read sees whether they are), and a narration written again
+            # counts as checked against the game track, which it is whenever the game track has sound.
+            sounding = {int(o) for o in sounding_stored} if isinstance(sounding_stored, list) else None
+            fixed = voice is not None and game is not None
+            compared = _compared_tracks(known, voice, game, sounding) if fixed else []
+            keep_words = transcript.exists() and _may_match(
+                _read_json(folder / NARRATION_STAMP_NAME),
+                narration_stamp(fields, prompt, entries, -1 if voice is None else voice, compared),
+                ({"voice"} if voice is None else set()) | (set() if fixed and sounding is not None else {"compared"}))
+            keep_voices = _may_match(
+                game_speech_module.stored_stamp(game_speech),
+                game_speech_module.stamp(model_name=quick, language=str(fields["language_code"]),
+                                         prefer_gpu=bool(fields["prefer_gpu"]), track=-1 if game is None else game,
+                                         narration_sha256=""),
+                {"narration"} | ({"track"} if game is None else set()))
+            whisper_models.refuse_unapproved(_models_to_load(
+                main=str(fields["model_name"]), quick=quick, find_voice=voice is None, write_narration=not keep_words,
+                compare=bool(compared) or not fixed, listen=listen_for_voices and not keep_voices))
+        phases, recording = _bind_at_prepare(payload, run, source)
+        project = run.create(recording)
+        print(f"Project: {project}", flush=True)
         holder: dict[str, Any] = {}
 
         def quick_transcriber() -> voice_track.Transcriber:
@@ -1154,6 +1205,17 @@ def prepare_from_request(payload: dict[str, Any]) -> dict[str, Any]:
                                          f"{voice + 1}).")
                     tracks = {"voice": voice, "game": game, "voice_decided_by": voice_by, "game_decided_by": game_by}
                     sounding = {ordinal for ordinal, item in read.activities.items() if not item.silent}
+                    compared = _compared_tracks(known, voice, game, sounding)
+                    have_transcript, have_voices = stored_steps(compared)
+                    # Stage 3 (review M4): with the tracks known, the rest of this run's models, before the narration is
+                    # written down. A narration written again may give the same words, so stored other voices that
+                    # fit but for those words are not counted as heard again yet.
+                    writes = not skip_transcript and not have_transcript
+                    may_keep_voices = writes and _may_match(game_speech_module.stored_stamp(game_speech),
+                                                            voices_stamp(False), {"narration"})
+                    whisper_models.refuse_unapproved(_models_to_load(
+                        main=str(fields["model_name"]), quick=quick, find_voice=False, write_narration=writes,
+                        compare=bool(compared), listen=listen_for_voices and not have_voices and not may_keep_voices))
                     update_project(project, tracks=tracks, layout=layout, video=picture, sounding=sorted(sounding))
                     record_track_overrides(project, tracks)
                     run.keep()
@@ -1162,10 +1224,8 @@ def prepare_from_request(payload: dict[str, Any]) -> dict[str, Any]:
                     # 226: a chosen track with no sound is used as chosen, and said plainly.
                     _say_warnings(silent_track_warnings(tracks, read.levels))
 
-                    compared = _compared_tracks(known, voice, game, sounding)
                     read.keep_only({voice, game, *compared})
-                    have_transcript, have_voices = stored_steps(compared)
-                    if not skip_transcript and not have_transcript:
+                    if writes:
                         _write_narration(wav=read.wavs[voice], folder=folder, source=source, voice=voice,
                                          compared=compared, titles=titles, wavs=read.wavs, fields=fields, prompt=prompt,
                                          entries=entries, ffmpeg=ffmpeg,

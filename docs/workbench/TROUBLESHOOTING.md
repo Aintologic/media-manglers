@@ -130,11 +130,16 @@ it downloads them again and replaces the copy in your user folder.
 
 A model is downloaded only after you approve it with **Approve download** in
 **Settings > Dependencies**, in every feature. Readiness alone never downloads
-it. If a run, a scan or the AI Video Editor stops with "The Whisper model … is
-not on this PC yet", approve that model there and run again. A model that does
+it. If a run, a scan or the AI Video Editor refuses to start because "The
+Whisper model … is not on this PC yet", approve that model there and run again;
+Find my bug reports, the raw bin's scans and the AI Video Editor use the main
+model saved in Settings, which has a row of its own. A model you approve while
+another is downloading waits its turn and starts by itself. A model that does
 not match the file Whisper published is not used, and it is never replaced
-without that approval. A background job, such as the waveforms, skips listening
-instead of asking, and listens once the model is there.
+without that approval. If a download stopped at its very last step, approving
+it again puts the finished file in place without downloading it again. A
+background job, such as the waveforms, skips listening instead of asking, says
+which model it needs, and listens once the model is there.
 
 ### Media Manglers is already open
 
@@ -145,9 +150,9 @@ library and one settings folder. Switch to the window that is open.
 
 A download, or a step that unpacks or removes Media Manglers' own downloaded
 files, waits at most ten seconds for a file another program has open (often a
-virus scanner looking at a new file), and thirty seconds for the whole step.
-If the file is still held, the step stops, names the program, and nothing is
-lost. Wait a moment, or close that program, and try again.
+virus scanner looking at a new file), and thirty seconds for the whole step,
+trying again all the while. If the file is still held, the step stops, names
+the program, and nothing is lost. Wait a moment, then try again.
 
 ### CUDA and CPU fallback
 

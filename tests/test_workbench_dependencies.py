@@ -18,6 +18,7 @@ from media_manglers_workbench.dependencies import (  # noqa: E402
     StoppableRunner,
     run_dependency_preflight,
 )
+from media_manglers_workbench import dependencies  # noqa: E402
 from media_manglers_workbench.resources import RuntimeResources  # noqa: E402
 
 
@@ -36,8 +37,13 @@ def _running(pid: int) -> bool:
 
 
 class FakeDependencyRunner:
-    def __init__(self, python_payloads: dict[str, dict[str, object]]) -> None:
+    def __init__(self, python_payloads: dict[str, dict[str, object]],
+                 model_state: str | None = None) -> None:
         self.python_payloads = python_payloads
+        # M5 of the Wave I-A review: the models' checksum probe gets an answer of its own (by default what the
+        # Python's own probe says: valid when cached, else missing), so no row relies on the fallback for a probe
+        # that did not answer.
+        self.model_state = model_state
 
     def __call__(
         self,
@@ -46,6 +52,13 @@ class FakeDependencyRunner:
         _env: dict[str, str] | None,
     ) -> subprocess.CompletedProcess[str]:
         executable = str(Path(argv[0]).resolve())
+        if executable in self.python_payloads and "-c" in argv and argv[argv.index("-c") + 1] == \
+                dependencies._MODEL_PROBE:
+            names = argv[argv.index("-c") + 2:]
+            cached = self.python_payloads[executable].get("model_cached", True)
+            state = self.model_state or ("valid" if cached else "missing")
+            states = {name: {"state": state, "path": rf"C:\SyntheticCache\{name}.pt"} for name in names}
+            return subprocess.CompletedProcess(argv, 0, json.dumps(states) + "\n", "")
         if executable in self.python_payloads and "-c" in argv:
             payload = {**self.python_payloads[executable], "python_path": executable}
             return subprocess.CompletedProcess(argv, 0, json.dumps(payload) + "\n", "")

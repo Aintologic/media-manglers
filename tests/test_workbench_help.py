@@ -21,6 +21,7 @@ from media_manglers_workbench.app import (  # noqa: E402
 )
 from media_manglers_workbench.levels_service import (  # noqa: E402
     STATE_FAILED,
+    STATE_MODEL_NOT_APPROVED,
     STATE_NO_AUDIO,
     STATE_STILL_RECORDING,
     STATE_WAITING_FOR_RUN,
@@ -310,6 +311,8 @@ class WorkbenchHelpTests(unittest.TestCase):
             "STATE_STILL_RECORDING": STATE_STILL_RECORDING,
             "STATE_NO_AUDIO": STATE_NO_AUDIO,
             "STATE_FAILED": STATE_FAILED,
+            # M7 of the Wave I-A review: listening skipped for want of an approved model.
+            "STATE_MODEL_NOT_APPROVED": STATE_MODEL_NOT_APPROVED.format(model="the Whisper model base.en"),
             "MEASURE_AGAIN_TEXT": MEASURE_AGAIN_TEXT,
             "MEASURE_AGAIN_LIBRARY_TOOLTIP": MEASURE_AGAIN_LIBRARY_TOOLTIP,
             "NO_WAVEFORMS_CLIP_TEXT": NO_WAVEFORMS_CLIP_TEXT,

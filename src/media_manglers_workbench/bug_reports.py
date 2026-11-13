@@ -126,12 +126,14 @@ def whisper_notice(lines: list[str], model_name: str) -> str:
     model = whisper_model_file(model_name)
     parts: list[str] = []
     if damaged:
+        # L2 of the Wave I-A review: a damaged model is replaced only by the download the operator approves, never
+        # by Whisper itself, so the fix is the approval, not renaming the file.
         parts.append(
-            f'The Whisper speech model "{model.stem}" on this PC is damaged: it failed its checksum check'
+            f'The Whisper speech model "{model_name or model.stem}" on this PC is damaged: it failed its checksum check'
             + (", so your graphics card could not be used and speech is being written down on the processor, "
                "which is much slower." if fallback else ".")
-            + f" To fix it, when this run ends rename {model} to {model.name}.bad and run again; Whisper then "
-            "downloads a fresh copy."
+            + " It is never replaced without your approval: when this run ends, approve its download in Settings > "
+            "Dependencies, then run again."
         )
     elif fallback:
         reason = fallback.group("reason").strip().rstrip(".")

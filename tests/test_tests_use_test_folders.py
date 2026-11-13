@@ -86,5 +86,33 @@ class TestFoldersTests(unittest.TestCase):
             app.processEvents()
 
 
+class TestModelsNeverTouchARealCacheTests(unittest.TestCase):
+    """M16 of the Wave I-A review: the test Whisper models (``tests/whisper_test_models.py``) are tiny stand-ins. Run
+    outside pytest, with ``XDG_CACHE_HOME`` naming a real cache, the helper must never write them over real models."""
+
+    def test_the_test_models_never_overwrite_a_cache_that_is_not_a_test_folder(self) -> None:
+        import subprocess
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as temp:
+            real = Path(temp) / "operator-cache"
+            model = real / "whisper" / "base.en.pt"
+            model.parent.mkdir(parents=True)
+            model.write_bytes(b"a real downloaded model" * 100)
+            before = model.read_bytes()
+            code = ("import sys; sys.path[:0] = [%r, %r]; from tests import whisper_test_models as m; "
+                    "from media_manglers.core import whisper_models as w; print(w.cache_dir());\n"
+                    "try:\n    m.install_models(['base.en'])\nexcept RuntimeError as exc:\n    print('REFUSED', exc)"
+                    % (str(REPO_ROOT), str(REPO_ROOT / "src")))
+            env = {key: value for key, value in os.environ.items() if not key.startswith("PYTEST")}
+            env["XDG_CACHE_HOME"] = str(real)
+            run = subprocess.run([sys.executable, "-B", "-c", code], env=env, cwd=str(REPO_ROOT),
+                                 capture_output=True, text=True, timeout=120, check=False)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            self.assertEqual(model.read_bytes(), before, "the real model was left exactly as it was")
+            used = Path(run.stdout.strip().splitlines()[0])
+            self.assertFalse(_inside(used, real), f"the helper used {used}, inside the real cache")
+
+
 if __name__ == "__main__":
     unittest.main()

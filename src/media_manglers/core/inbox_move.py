@@ -523,8 +523,8 @@ def move_ledger(records: recording_records.Records, settings: Mapping[str, Any],
             # settings file that could not be read, or a profile that names a ledger, is not that: it waits.
             if _settings_unreadable(Path(settings_path)):
                 return MoveResult("waiting", "Your settings file could not be read, so the Inbox's records were not "
-                                             "moved into the library yet. Nothing was changed. Close anything that "
-                                             "has it open, then restart.")
+                                             "moved into the library yet. Nothing was changed. Wait a moment, then "
+                                             "restart; if it still cannot be read, check that the file is there.")
             if profiles["with_ledger_path"]:
                 return MoveResult("waiting", "A custom profile names an Inbox ledger but your settings do not, so "
                                              "nothing was moved into the library and the Inbox is not available "
@@ -593,8 +593,10 @@ def _move_locked(records: recording_records.Records, connection: sqlite3.Connect
                  profiles: dict[str, int], version: str, save_folder: Callable[[Path], None]) -> MoveResult:
     _step("locked")
     if _held_by_another_program(ledger):
+        # H3 of the Wave I-A review: that program may be a virus scanner, so it is never asked to be closed.
         return MoveResult("waiting", "Your Inbox's ledger is open in another program, so its records were not moved "
-                                     "into the library yet. Close that program, then restart.")
+                                     "into the library yet. Nothing was changed. If you opened the ledger yourself, "
+                                     "finish with it there; otherwise wait a moment. Then restart.")
     status = str(latest["status"]) if latest is not None else ""
     if status == "started":
         # Cut off before or during the import, which is one transaction: nothing was imported.

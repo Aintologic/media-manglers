@@ -9,6 +9,8 @@ are proven with a real hold without the suite waiting that long; the real-clock 
 from __future__ import annotations
 
 import ast
+import errno
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -140,11 +142,11 @@ class BudgetTests(FileStepCase):
         for index in range(700):
             self._file(f"addons/sp-1/pkg/{index:04d}.py", "x")
         held = folder / "pkg" / "0690.py"
-        clock = StepClock()
+        # The real clock: Windows is asked beside the step, and needs real time to answer about 700 files.
         with OutsideHolder(held, forever=True) as holder:
             with self.assertRaises(FileInUse) as caught:
-                safe_write.remove_disposable_tree(folder, within=self.root, budget=StepBudget(clock=clock),
-                                                  pause=clock.pause)
+                safe_write.remove_disposable_tree(folder, within=self.root, budget=StepBudget(per_file=4.0,
+                                                                                              per_step=4.0))
         self.assertIn(holder.pid, [found.pid for found in caught.exception.holders])
         self.assertEqual(len(list(folder.rglob("*.py"))), 700, "the folder stays whole under its own name")
 
@@ -166,13 +168,71 @@ class StopAtOnceTests(FileStepCase):
         os.chmod(notes, stat.S_IREAD)
         held = self._file("addons/sp-1/torch.dll")
         clock = StepClock()
-        with OutsideHolder(folder, folder=True, forever=True) as holder:
+        reached: list[int | None] = []
+        real_rule = safe_write._read_only_path
+
+        def spy(exc: OSError, paths: list[Path]) -> Path | None:
+            reached.append(getattr(exc, "winerror", None))
+            return real_rule(exc, paths)
+
+        # M9 of the Wave I-A review: a file inside the folder is held (not the folder's own handle), so Windows
+        # answers "access denied" and the read-only rule is really reached, and must still not stop the wait.
+        with OutsideHolder(held, forever=True) as holder, mock.patch.object(safe_write, "_read_only_path",
+                                                                             side_effect=spy):
             with self.assertRaises(FileInUse):
                 safe_write.rename_into_place(folder, self.root / "addons" / "sp-2", budget=StepBudget(clock=clock),
                                              pause=clock.pause)
+        self.assertIn(5, reached, "Windows said access denied, so the read-only rule looked at the refusal")
         self.assertAlmostEqual(clock.now - 1000.0, 10.0, places=6, msg="it waited the full ten seconds")
         self.assertTrue(held.exists() and notes.exists())
         self.assertIsNotNone(holder.pid)
+
+    def test_a_read_only_file_being_replaced_stops_at_once(self) -> None:
+        # M9: replacing a damaged model that is marked read-only; Windows names the target second (filename2).
+        partial = self._file("cache/medium.pt.partial", "weights")
+        target = self._file("cache/medium.pt", "damaged")
+        os.chmod(target, stat.S_IREAD)
+        clock = StepClock()
+        with self.assertRaises(FileStepRefused) as caught:
+            safe_write.place_checked(partial, target, hashlib.sha256(b"weights").hexdigest(), replace=True,
+                                     budget=StepBudget(clock=clock), pause=clock.pause)
+        self.assertEqual(clock.pauses, [], "no wait")
+        self.assertIn("medium.pt could not be put in place: it is marked read-only", str(caught.exception))
+        self.assertEqual(target.read_text(encoding="utf-8"), "damaged")
+        self.assertTrue(partial.exists(), "nothing was lost")
+
+    def test_an_own_hold_that_begins_after_the_first_refusal_still_stops_at_once(self) -> None:
+        # M9: another program held it at the first refusal; then the app itself took it. Asked again, it stops.
+        target = self._file("cache/medium.pt")
+        clock = StepClock()
+        answers = iter([[(4242, 1, "Scanner", "", 0)]])
+        refusal = OSError(errno.EACCES, "The process cannot access the file", str(target), 32)
+
+        def refuse() -> None:
+            raise refusal
+
+        with mock.patch.object(safe_write, "_holder_details",
+                               side_effect=lambda _paths: next(answers, [(os.getpid(), 1, "python.exe", "", 0)])), \
+                mock.patch.object(safe_write, "_program_file", return_value="scan.exe"):
+            with self.assertRaises(FileInUse) as caught:
+                safe_write._with_budget(refuse, [target], "removed", StepBudget(clock=clock), clock.pause,
+                                        source=target)
+        self.assertIn("fault in the app", str(caught.exception))
+        self.assertLess(clock.now - 1000.0, 10.0, "it did not wait out the ten seconds for its own hold")
+
+    def test_the_message_names_the_file_that_is_really_held(self) -> None:
+        # M9: an approved download replacing a damaged model, whose old file another program holds.
+        partial = self._file("cache/medium.pt.partial", "weights")
+        target = self._file("cache/medium.pt", "damaged")
+        clock = StepClock()
+        with OutsideHolder(target, forever=True) as holder:
+            with self.assertRaises(FileInUse) as caught:
+                safe_write.place_checked(partial, target, hashlib.sha256(b"weights").hexdigest(), replace=True,
+                                         budget=StepBudget(clock=clock), pause=clock.pause)
+        text = str(caught.exception)
+        self.assertTrue(text.startswith("medium.pt could not be put in place because "), text)
+        self.assertIn(f"(process {holder.pid}) has it open", text)
+        self.assertTrue(partial.exists() and target.read_text(encoding="utf-8") == "damaged", "nothing was lost")
 
     def test_a_file_the_app_itself_holds_stops_at_once(self) -> None:
         target = self._file("addons/sp-1/torch.dll")
@@ -191,7 +251,10 @@ class MessageTests(unittest.TestCase):
     def test_each_kind_of_holder_gets_its_own_plain_words(self) -> None:
         program = safe_write.new_step_held_message(self.target, "removed", [Holder(4, "Scanner", "program")])
         self.assertIn("because Scanner (process 4) has it open", program)
-        self.assertIn("Close that program", program)
+        # H3 of the Wave I-A review: Windows reports some virus scanners as ordinary programs, so a program is
+        # never told to be closed; the step waited, and the message says to wait and try again.
+        self.assertIn("Wait a moment", program)
+        self.assertNotIn("close", program.casefold())
         service = safe_write.new_step_held_message(self.target, "removed",
                                                    [Holder(7, "Windows Search", "service", "WSearch")])
         self.assertIn("the Windows service Windows Search (process 7)", service)
@@ -271,6 +334,8 @@ class NewStepTests(FileStepCase):
                 path = building / "pkg" / f"module{index}.py"
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(f"value = {index}\n", encoding="utf-8")
+            # The scanner has its hands on the new files before the rename, however busy the PC is.
+            scanner.wait_opened()
             safe_write.rename_into_place(building, addons / "sp-1", budget=StepBudget())
             # A download checked and put in place while the scanner holds it.
             partial = addons / "model.mm-partial"
@@ -331,6 +396,28 @@ class FileStepCommandTests(FileStepCase):
         self.assertGreaterEqual(elapsed, 9.5)
         self.assertLess(elapsed, 30.0)
 
+    def test_remove_addons_finishes_what_an_interrupted_removal_left(self) -> None:
+        # M10 of the Wave I-A review: a removal cut short leaves the add-ons under a trash name beside their folder.
+        trash = self._file(f"local/MediaManglers/{safe_write.TRASH_PREFIX}0123456789ab/torch/lib.dll").parents[1]
+        keep = self._file("local/MediaManglers/Workbench/library/keep.txt", "your library")
+        run = self._command("remove-addons")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        result = json.loads(run.stdout.strip().splitlines()[-1])
+        self.assertTrue(result["data"]["removed"], result)
+        self.assertNotIn("no downloaded add-ons", result["data"]["message"])
+        self.assertFalse(trash.exists())
+        self.assertEqual(keep.read_text(encoding="utf-8"), "your library", "data is never touched")
+
+    def test_remove_addons_never_reports_success_while_something_is_left(self) -> None:
+        held = self._file(f"local/MediaManglers/{safe_write.TRASH_PREFIX}0123456789ab/torch/lib.dll")
+        clock = StepClock()
+        with mock.patch.dict(os.environ, {user_folders.WORKBENCH_LOCALAPPDATA_ENV: str(self.root / "local")}), \
+                OutsideHolder(held, forever=True):
+            with self.assertRaises(FileInUse) as caught:
+                file_steps.remove_addons(budget=StepBudget(clock=clock), pause=clock.pause)
+        self.assertIn(f"{safe_write.TRASH_PREFIX}0123456789ab", str(caught.exception))
+        self.assertTrue(held.exists(), "nothing was lost")
+
     def test_run_carries_out_a_list_of_steps(self) -> None:
         source = self._file("work/a.txt", "a")
         request = self.root / "request.json"
@@ -342,6 +429,167 @@ class FileStepCommandTests(FileStepCase):
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertEqual(len(json.loads(run.stdout.strip().splitlines()[-1])["data"]["steps"]), 2)
         self.assertFalse((self.root / "work" / "b.txt").exists())
+
+
+class SlowQuestionTests(FileStepCase):
+    """H4 of the Wave I-A review: asking Windows' Restart Manager who holds a file takes a few milliseconds per file,
+    about a minute for a whole speech-library set. A stand-in that takes fifteen seconds to answer proves the step
+    keeps trying while it waits for the answer, and never waits past its own limits for it (the real clock)."""
+
+    @staticmethod
+    def _slow(_paths: list[Path]) -> list[tuple[int, int, str, str, int]]:
+        time.sleep(15)
+        return []
+
+    def test_a_slow_answer_never_holds_the_step_past_its_own_limit(self) -> None:
+        target = self._file("addons/sp-1/torch/lib/torch_cpu.dll")
+        with OutsideHolder(target, forever=True), mock.patch.object(safe_write, "_holder_details",
+                                                                     side_effect=self._slow):
+            started = time.monotonic()
+            with self.assertRaises(FileInUse):
+                safe_write.remove(target, budget=StepBudget(per_file=2.0, per_step=4.0))
+            elapsed = time.monotonic() - started
+        self.assertGreaterEqual(elapsed, 1.9)
+        self.assertLess(elapsed, 4.0, "the two seconds by the clock, not the fifteen of the question")
+        self.assertTrue(target.exists(), "nothing was lost")
+
+    def test_a_brief_hold_ends_the_wait_while_the_slow_answer_is_still_coming(self) -> None:
+        target = self._file("addons/sp-1/torch/lib/torch_cpu.dll")
+        with OutsideHolder(target, seconds=1.0), mock.patch.object(safe_write, "_holder_details",
+                                                                    side_effect=self._slow):
+            started = time.monotonic()
+            safe_write.remove(target, budget=StepBudget())
+            elapsed = time.monotonic() - started
+        self.assertFalse(target.exists())
+        self.assertLess(elapsed, 5.0, "tried again while Windows was still being asked, and succeeded")
+
+    def test_the_step_limit_holds_across_files_with_a_slow_answer(self) -> None:
+        files = [self._file(f"set/file{index}.bin") for index in range(3)]
+        holders = [OutsideHolder(path, forever=True) for path in files]
+        try:
+            budget = StepBudget(per_file=1.5, per_step=2.5)
+            with mock.patch.object(safe_write, "_holder_details", side_effect=self._slow):
+                started = time.monotonic()
+                for path in files:
+                    with self.assertRaises(FileInUse):
+                        safe_write.remove(path, budget=budget)
+                elapsed = time.monotonic() - started
+        finally:
+            for holder in holders:
+                holder.close()
+        self.assertGreaterEqual(elapsed, 2.4)
+        self.assertLess(elapsed, 4.0, "the step's own limit, by the clock")
+        self.assertTrue(all(path.exists() for path in files))
+
+
+class LargeFolderTests(unittest.TestCase):
+    """H4 of the Wave I-A review, on a real folder the size of the speech-library set (16,000 files; the set
+    downloaded at first launch has about 23,500). A virus scanner that holds one file for a moment is waited out and
+    the step succeeds; one that never lets go stops the step at the ten-second limit by the clock, naming it; the
+    app's own hold stops it at once; nothing is ever lost."""
+
+    FILES = 16_000
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.temp = tempfile.TemporaryDirectory()
+        cls.root = Path(cls.temp.name)
+        cls.local = cls.root / "local"
+        cls.addons = cls.local / "MediaManglers" / "addons"
+        cls.building = cls.addons / "sp-1.tmp"
+        cls.final = cls.addons / "sp-1"
+        cls.held_name = Path("torch") / "lib" / "torch_cpu.dll"
+        cls._build()
+
+    @classmethod
+    def _build(cls) -> None:
+        for index in range(cls.FILES):
+            path = cls.building / f"d{index // 400:03d}" / f"m{index:05d}.py"
+            if index % 400 == 0:
+                path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"x = 1\n")
+        held = cls.building / cls.held_name
+        held.parent.mkdir(parents=True, exist_ok=True)
+        held.write_bytes(b"\0" * 65536)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.temp.cleanup()
+
+    def setUp(self) -> None:
+        # Every test starts from the whole set under its temporary name.
+        if self.final.exists() and not self.building.exists():
+            self._rename(self.final, self.building)
+        if not self.building.exists():
+            self._build()
+        self.held = self.building / self.held_name
+
+    @staticmethod
+    def _rename(source: Path, destination: Path) -> None:
+        """The test's own rename, which waits for the previous test's ended holder to let go."""
+
+        deadline = time.monotonic() + 20
+        while True:
+            try:
+                os.rename(source, destination)
+                return
+            except PermissionError:
+                if time.monotonic() > deadline:
+                    raise
+                time.sleep(0.2)
+
+    def _whole(self, folder: Path) -> bool:
+        return sum(len(files) for _root, _folders, files in os.walk(folder)) == self.FILES + 1
+
+    def test_a_brief_outside_hold_is_waited_out_and_the_set_is_put_in_place(self) -> None:
+        tries: list[float] = []
+        real_rename = os.rename
+
+        def counting(source: object, destination: object) -> None:
+            tries.append(time.monotonic())
+            real_rename(source, destination)
+
+        with OutsideHolder(self.held, seconds=2.0):
+            started = time.monotonic()
+            with mock.patch.object(safe_write.os, "rename", side_effect=counting):
+                safe_write.rename_into_place(self.building, self.final, budget=StepBudget())
+            elapsed = time.monotonic() - started
+        self.assertTrue(self._whole(self.final), "the whole set is in place")
+        self.assertLess(elapsed, 10.0, "waited out within the ten seconds")
+        self.assertGreater(len(tries), 2, "tried again and again while Windows was asked who held it")
+
+    def test_a_file_the_app_itself_holds_stops_the_step_at_once(self) -> None:
+        with open(self.held, "rb"):  # Python opens files with no delete sharing on Windows
+            started = time.monotonic()
+            with self.assertRaises(FileInUse) as caught:
+                safe_write.rename_into_place(self.building, self.final, budget=StepBudget())
+            elapsed = time.monotonic() - started
+        self.assertIn("fault in the app", str(caught.exception))
+        self.assertLess(elapsed, 5.0, "it never waits on its own hold")
+        self.assertTrue(self._whole(self.building), "nothing was lost")
+
+    def test_a_hold_that_never_ends_stops_at_the_ten_second_limit_and_names_the_program(self) -> None:
+        with OutsideHolder(self.held, forever=True) as holder:
+            started = time.monotonic()
+            with self.assertRaises(FileInUse) as caught:
+                safe_write.rename_into_place(self.building, self.final, budget=StepBudget())
+            elapsed = time.monotonic() - started
+        self.assertGreaterEqual(elapsed, 9.5)
+        self.assertLess(elapsed, 13.0, "ten seconds by the clock, the question to Windows included")
+        self.assertIn(holder.pid, [found.pid for found in caught.exception.holders])
+        self.assertTrue(self._whole(self.building), "nothing was lost")
+        self.assertFalse(self.final.exists())
+
+    def test_remove_addons_waits_out_a_brief_hold_on_a_set_of_that_size(self) -> None:
+        self._rename(self.building, self.final)
+        with mock.patch.dict(os.environ, {user_folders.WORKBENCH_LOCALAPPDATA_ENV: str(self.local)}), \
+                OutsideHolder(self.final / self.held_name, seconds=2.0):
+            started = time.monotonic()
+            result = file_steps.remove_addons()
+            elapsed = time.monotonic() - started
+        self.assertTrue(result["removed"])
+        self.assertFalse(self.addons.exists())
+        self.assertLess(elapsed, 30.0, "within the step's thirty seconds")
 
 
 HOLD_LOCK = textwrap.dedent("""
@@ -384,25 +632,37 @@ class LockTests(unittest.TestCase):
         self.assertNotEqual(first, second)
 
     def test_a_second_workbench_says_so_and_closes_before_opening_anything(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            env = {**os.environ, "QT_QPA_PLATFORM": "offscreen",
-                   "MEDIA_MANGLERS_WORKBENCH_APPDATA": str(Path(temp) / "Roaming"),
-                   "MEDIA_MANGLERS_WORKBENCH_LOCALAPPDATA": str(Path(temp) / "Local")}
-            name = app_locks.workbench_lock_name(env)
-            other = self._holder(name)
-            try:
-                code = ("import sys; sys.path.insert(0, %r); from media_manglers_workbench import app; "
-                        "sys.exit(app.main(['--offscreen', '--smoke-test']))" % str(REPO_ROOT / "src"))
-                run = subprocess.run([sys.executable, "-c", code], env=env, cwd=temp, capture_output=True, text=True,
-                                     timeout=120, check=False)
-            finally:
-                other.stdin.write("\n")
-                other.stdin.flush()
-                other.wait(10)
-            self.assertEqual(run.returncode, 4, run.stderr[-2000:])
-            self.assertIn("already open", run.stderr)
-            self.assertFalse((Path(temp) / "Local" / "MediaManglers" / "Workbench" / "library").exists(),
-                             "it opened nothing")
+        # L13 of the Wave I-A review: every folder it could open points into one empty folder of the test, so "it
+        # opened nothing" is a check that can fail. L12: a launch for a screenshot or a timed check (offscreen, no
+        # smoke test) never waits on a box no one can see.
+        for arguments in (["--offscreen", "--smoke-test"], ["--offscreen", "--exit-after-ms", "60000"]):
+            with self.subTest(arguments=arguments), tempfile.TemporaryDirectory() as temp:
+                data = Path(temp) / "data"
+                data.mkdir()
+                env = {**os.environ, "QT_QPA_PLATFORM": "offscreen",
+                       "MEDIA_MANGLERS_WORKBENCH_APPDATA": str(data / "Roaming"),
+                       "MEDIA_MANGLERS_WORKBENCH_LOCALAPPDATA": str(data / "Local"),
+                       "MEDIA_MANGLERS_LIBRARY_ROOT": str(data / "library"),
+                       "MEDIA_MANGLERS_CACHE_ROOT": str(data / "cache"),
+                       "MEDIA_MANGLERS_SCRATCH_ROOT": str(data / "scratch"),
+                       "MEDIA_MANGLERS_RACE_VIDEO_PRIVACY": str(data / "privacy"),
+                       "MEDIA_MANGLERS_VIDEOS_FOLDER": str(data / "Videos"),
+                       "MEDIA_MANGLERS_MUSIC_FOLDER": str(data / "Music"),
+                       "XDG_CACHE_HOME": str(data / "xdg-cache")}
+                name = app_locks.workbench_lock_name(env)
+                other = self._holder(name)
+                try:
+                    code = ("import sys; sys.path.insert(0, %r); from media_manglers_workbench import app; "
+                            "sys.exit(app.main(%r))" % (str(REPO_ROOT / "src"), arguments))
+                    run = subprocess.run([sys.executable, "-c", code], env=env, cwd=temp, capture_output=True,
+                                         text=True, timeout=120, check=False)
+                finally:
+                    other.stdin.write("\n")
+                    other.stdin.flush()
+                    other.wait(10)
+                self.assertEqual(run.returncode, 4, run.stderr[-2000:])
+                self.assertIn("already open", run.stderr)
+                self.assertEqual(list(data.rglob("*")), [], "it opened nothing")
 
     def test_every_helper_run_holds_the_running_lock(self) -> None:
         code = ("import sys, json; sys.path.insert(0, %r); from media_manglers import cli; "

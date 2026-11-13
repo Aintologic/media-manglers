@@ -130,7 +130,7 @@ class BackendRunControlTests(unittest.TestCase):
         "Get-MMProcessTreeIds",
         "Stop-MMProcessTree",
         "Set-MMProcessTreeSuspended",
-        "Wait-MMWhilePaused",
+        "Wait-MMWhilePaused", "Test-MMStartingAppAlive",
         "Invoke-MMRunControlCheck",
         "Test-MMCompleteJpeg",
         "Invoke-ExternalCapture",
