@@ -11,6 +11,7 @@ import ast
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -21,14 +22,27 @@ from unittest import mock
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from media_manglers.core import voice_track  # noqa: E402
+from media_manglers.core import voice_track, whisper_models  # noqa: E402
 from media_manglers.providers import whisper_local  # noqa: E402
 from media_manglers_workbench.command_builder import build_workflow_command  # noqa: E402
 from media_manglers_workbench.metadata import WORKFLOW_TRANSCRIPT_ONLY  # noqa: E402
 from media_manglers_workbench.settings import build_default_settings  # noqa: E402
+from tests.whisper_test_models import whisper_gets_file_names  # noqa: E402
+
+# H2 of the Wave I-A review: these stand-ins are given a file name; see whisper_gets_file_names.
+_FILE_NAMES = whisper_gets_file_names()
+
+
+def setUpModule() -> None:  # noqa: N802 - unittest's name
+    _FILE_NAMES.start()
+
+
+def tearDownModule() -> None:  # noqa: N802 - unittest's name
+    _FILE_NAMES.stop()
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "Video Mangler.ps1"
+AUDIO_SCRIPT = REPO_ROOT / "Audio Mangler.ps1"
 
 
 def _outside_functions(tree: ast.AST):
@@ -45,11 +59,11 @@ def _values(argv: list[str], flag: str) -> list[str]:
     return [argv[index + 1] for index, token in enumerate(argv) if token == flag]
 
 
-def _function_text(name: str) -> str:
+def _function_text(name: str, script: Path = SCRIPT) -> str:
     source = textwrap.dedent(
         f"""
         $tokens = $null; $parseErrors = $null
-        $ast = [System.Management.Automation.Language.Parser]::ParseFile('{SCRIPT}', [ref]$tokens, [ref]$parseErrors)
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile('{script}', [ref]$tokens, [ref]$parseErrors)
         $node = $ast.Find({{ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq '{name}' }}, $true)
         [Console]::Out.Write($node.Extent.Text)
         """
@@ -164,6 +178,85 @@ class OneLoaderTests(unittest.TestCase):
         self.assertIn("ERROR: The Whisper helper failed: CUDA out of memory", failed.stdout, failed.stderr)
         self.assertIn("ERROR: Whisper transcription could not find the packaged python helper", missing.stdout,
                       missing.stderr)
+
+
+class AudioManglerOneLoaderTests(unittest.TestCase):
+    """Audio Mangler, the standalone audio script, kept its own Whisper script for when the shared helper failed.
+    When the helper refused a model that was missing or damaged, that script called whisper.load_model itself, and
+    Whisper downloaded the model, or replaced the damaged copy, without the operator's approval."""
+
+    def test_audio_mangler_never_loads_whisper_itself(self) -> None:
+        # No Python that Audio Mangler can run calls load_model: a Whisper load goes through the shared helper.
+        text = AUDIO_SCRIPT.read_text(encoding="utf-8")
+        found = [f"Audio Mangler.ps1:{number}: {line.strip()}"
+                 for number, line in enumerate(text.splitlines(), start=1) if re.search(r"load_model\s*\(", line)]
+        self.assertEqual(found, [])
+        # The same search finds the shared helper's own load, so it would find one in the script.
+        helper = REPO_ROOT / "src" / "media_manglers" / "providers" / "whisper_local.py"
+        self.assertRegex(helper.read_text(encoding="utf-8"), r"whisper\.load_model\s*\(")
+
+    def test_audio_mangler_has_no_backup_whisper_script(self) -> None:
+        text = _function_text("Invoke-PythonWhisperTranscriptProcess", AUDIO_SCRIPT)
+        self.assertTrue(text)
+        self.assertNotIn("import whisper", text)
+        self.assertNotIn("Falling back", text)
+
+    def test_a_failed_helper_stops_the_audio_transcript_with_its_reason(self) -> None:
+        def quoted(value: str) -> str:
+            return "'" + value.replace("'", "''") + "'"
+
+        def run(temp: str, result: str) -> subprocess.CompletedProcess:
+            source = textwrap.dedent(
+                f"""
+                $tokens = $null; $parseErrors = $null
+                $ast = [System.Management.Automation.Language.Parser]::ParseFile('{AUDIO_SCRIPT}', [ref]$tokens, [ref]$parseErrors)
+                foreach ($name in @('Invoke-PythonWhisperTranscriptProcess', 'Get-MediaManglersPythonCliUnavailableMessage', 'Ensure-Directory')) {{
+                    $node = $ast.Find({{ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }}, $true)
+                    Invoke-Expression $node.Extent.Text
+                }}
+                function Get-PackagedRuntimeGuidance {{ 'Reinstall.' }}
+                function Write-Log {{ param([string]$Message, [string]$Level = 'INFO') [Console]::Out.WriteLine('LOG: ' + $Message) }}
+                # Anything started besides the helper would be a second Whisper loader.
+                function Invoke-ExternalStreaming {{ [Console]::Out.WriteLine('OTHER LOADER STARTED'); [pscustomobject]@{{ ExitCode = 1; StdOut = ''; StdErr = '' }} }}
+                function Invoke-ExternalCapture {{ [Console]::Out.WriteLine('OTHER LOADER STARTED'); [pscustomobject]@{{ ExitCode = 1; StdOut = ''; StdErr = '' }} }}
+                function Invoke-MediaManglersPythonCli {{ {result} }}
+                try {{
+                    Invoke-PythonWhisperTranscriptProcess -PythonCommand 'python' -AudioPath 'a.wav' -TranscriptFolder '{Path(temp) / "t"}' -ModelName 'base' -LanguageCode 'en' -FFmpegExe 'C:\\ff\\ffmpeg.exe' -PreferGpu $false | Out-Null
+                    [Console]::Out.WriteLine('NO ERROR')
+                }} catch {{ [Console]::Out.WriteLine('ERROR: ' + $_.Exception.Message) }}
+                """
+            ).strip()
+            harness = Path(temp) / "harness.ps1"
+            harness.write_text(source, encoding="utf-8-sig")
+            # Anything the script writes to the temporary folder stays inside this test's own folder.
+            return subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(harness)],
+                                  capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
+                                  env={**os.environ, "TEMP": temp, "TMP": temp})
+
+        def refused(message: str) -> str:
+            return ("[pscustomobject]@{ ExitCode = 1; Result = [pscustomobject]@{ ok = $false; error = "
+                    + quoted(message) + " } }")
+
+        with tempfile.TemporaryDirectory() as temp:
+            not_here = whisper_models.not_approved_message("base", whisper_models.MISSING)
+            damaged = whisper_models.not_approved_message("base", whisper_models.DAMAGED,
+                                                          str(Path(temp) / "whisper" / "base.pt"))
+            runs = {
+                "model not on this PC": (run(temp, refused(not_here)), "ERROR: The Whisper helper failed: " + not_here),
+                "model damaged": (run(temp, refused(damaged)), "ERROR: The Whisper helper failed: " + damaged),
+                "helper failed": (run(temp, refused("CUDA out of memory")),
+                                  "ERROR: The Whisper helper failed: CUDA out of memory"),
+                "no helper": (run(temp, "$null"), "ERROR: Whisper transcription could not find the packaged python helper"),
+            }
+        for case, (result, expected) in runs.items():
+            with self.subTest(case):
+                self.assertIn(expected, result.stdout, result.stderr)
+                self.assertNotIn("OTHER LOADER STARTED", result.stdout)
+                self.assertNotIn("NO ERROR", result.stdout)
+        # The error the operator sees carries the refusal's way out.
+        error = [line for line in runs["model not on this PC"][0].stdout.splitlines() if line.startswith("ERROR: ")]
+        self.assertEqual(len(error), 1)
+        self.assertIn("Approve its download in Settings > Dependencies", error[0])
 
 
 class NarrationDefaultsTests(unittest.TestCase):

@@ -143,7 +143,7 @@ class BackendSkipTests(unittest.TestCase):
 
     FUNCTIONS = (
         "Invoke-TranscriptOnlyBatch", "Get-MMRunControl", "Test-MMSourceSkipRequested", "Test-MMPauseRequested",
-        "Test-MMSkipException", "Wait-MMWhilePaused", "Invoke-MMRunControlCheck", "Stop-MMProcessTree",
+        "Test-MMSkipException", "Wait-MMWhilePaused", "Test-MMStartingAppAlive", "Invoke-MMRunControlCheck", "Stop-MMProcessTree",
         # 214: the shared track choice, as Package any video for AI's.
         "Get-MMFullReviewAutoTrackNumber", "Resolve-TranscriptAudioSelection", "Resolve-AudioTrackOrdinal",
         "Export-AllTracksReviewMixWav",

@@ -18,15 +18,23 @@ Closing the Workbench while the check is running closes it at once: the check
 is stopped, with any tool it had started, and runs again at the next launch.
 
 > **Download approval:** A Whisper model is never downloaded without your
-> approval, in any feature. Each model a workflow will load has its own row: the
-> selected model, `base.en` (every review and scan uses it to find your voice)
-> and the AI Video Editor's quick-pass model. A model already in your Whisper
-> cache that matches the file Whisper published is used as it is, with no
-> download. A missing model, or one that does not match, offers **Approve
-> download**: it shows the size, and on **Yes** downloads that one model at once,
-> checks it against the published file, and then checks readiness again. A model
-> that does not match is never replaced without that approval. **Start** and
-> **Find my bug reports** wait until the models they need are there.
+> approval, in any feature. Each model a workflow will load has its own row: New
+> Review's model, the main model saved in Settings (Find my bug reports, the raw
+> bin's scans and the AI Video Editor load it), `base.en` (every review and scan
+> uses it to find your voice) and the AI Video Editor's quick-pass model. A model
+> already in your Whisper cache that matches the file Whisper published is used
+> as it is, with no download. A missing model, or one that does not match, offers
+> **Approve download**: it shows the size, and on **Yes** downloads that one
+> model, checks it against the published file, and then checks readiness again.
+> If you approve another model while one is downloading, it waits its turn and
+> starts by itself after the first. While a model downloads, nothing reads it: its
+> row says it is downloading. A model that does not match is never replaced
+> without that approval. If the check against the published file could not
+> finish, the row says the model was not checked, and each run checks it before
+> using it. **Start**, **Find my bug reports**, the raw bin's scans and the AI
+> Video Editor's **Prepare** do not start while a model they load is missing,
+> does not match, is downloading, or has not been checked since you changed it;
+> each says which model and what to do.
 
 Only one Workbench runs at a time, because every copy of Media Manglers on this
 PC shares one library and one settings folder. Starting a second one says so and
@@ -97,8 +105,10 @@ in the same order:
    `-FFprobePath`, `-PythonExe` or `-YtDlpPath`);
 2. for FFprobe, the file beside the FFmpeg in use;
 3. the copy that comes with Media Manglers, in the `runtime` folder of its
-   application folder, when your edition carries one (FFmpeg, FFprobe and
-   Media Manglers' own Python);
+   application folder, when your edition carries one (FFmpeg and FFprobe, and
+   for the Workbench and `Video Mangler.ps1` also Media Manglers' own Python;
+   `Audio Mangler.ps1` never uses Media Manglers' own Python, only one of
+   yours);
 4. the system PATH;
 5. the folders the tool's own installer uses, such as the Windows Package
    Manager folders and Program Files.
@@ -113,11 +123,19 @@ path**, **Already on this PC** or **Part of Windows**.
 **Python.** Without a chosen Python, Media Manglers uses its own private Python
 when your edition carries one. A Python already on your PC is used instead only
 when it can do something ours cannot: use your graphics card for Whisper, or
-run Argos Translate when translation is set to Local or Hybrid. Its row then
-says "Kept your Python because …". Media Manglers never installs, upgrades or
-removes anything in your own Python or in another program. The speech
-libraries its own Python needs are kept in `%LOCALAPPDATA%\MediaManglers\addons`,
-and only its own Python uses them.
+run Argos Translate when translation is set to Local with a language other than
+English (English comes from Whisper itself). Its row then says "Kept your
+Python because …". The Workbench and `Video Mangler.ps1` look for a Python of
+yours in the same places: PATH, the `py` launcher Python's own installer adds,
+and the folders that installer uses. If you change **Translate to** or the
+processing mode after readiness has run, **Start** asks you to choose **Refresh
+readiness** first, so the right Python is used. The Workbench never installs,
+upgrades or removes anything in your own Python or in another program; only the
+console script, run by hand, offers to install Argos Translate into a Python of
+yours, and only after you confirm it. The speech libraries Media Manglers' own
+Python needs are kept in `%LOCALAPPDATA%\MediaManglers\addons`, and only its own
+Python uses them. If they are not set up yet, a run says to choose **Set up**;
+it never suggests pip, which Media Manglers' own Python does not have.
 
 **Paths saved by an earlier version.** An earlier version saved paths it found
 as if you had chosen them. Once, when such a saved FFmpeg, FFprobe or Python

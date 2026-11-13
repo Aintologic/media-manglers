@@ -23,7 +23,7 @@ SCRIPT = REPO_ROOT / "Video Mangler.ps1"
 FUNCTIONS = (
     "Quote-Argument", "Format-DurationHuman", "Get-ExternalFailureSummary", "Get-MMRunControl",
     "Test-MMSourceSkipRequested", "Test-MMPauseRequested", "Test-MMSkipException", "Get-MMProcessTreeIds",
-    "Stop-MMProcessTree", "Set-MMProcessTreeSuspended", "Wait-MMWhilePaused", "Invoke-MMRunControlCheck",
+    "Stop-MMProcessTree", "Set-MMProcessTreeSuspended", "Wait-MMWhilePaused", "Test-MMStartingAppAlive", "Invoke-MMRunControlCheck",
     "Read-ProgressStateFile", "Get-ProgressDeviceValue", "Get-ProgressDeviceTag", "Get-ProgressStateSummary",
     "Get-ProgressStateSignature", "Invoke-ExternalStreaming", "Invoke-ExternalCapture", "Write-MMProgressV1",
 )

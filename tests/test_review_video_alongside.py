@@ -26,6 +26,32 @@ FFMPEG = shutil.which("ffmpeg")
 HAS_NVIDIA = shutil.which("nvidia-smi") is not None
 
 
+def _processor_seconds(pid: int) -> float:
+    """The processor time (user and kernel) process ``pid`` has used so far, as Windows counts it."""
+
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
+    handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        raise OSError(ctypes.get_last_error(), "could not open the stand-in process")
+    try:
+        created, ended, kernel, user = (wintypes.FILETIME() for _ in range(4))
+        if not kernel32.GetProcessTimes(handle, ctypes.byref(created), ctypes.byref(ended), ctypes.byref(kernel),
+                                        ctypes.byref(user)):
+            raise OSError(ctypes.get_last_error(), "could not read the stand-in's times")
+        total = 0
+        for value in (kernel, user):
+            total += (value.dwHighDateTime << 32) | value.dwLowDateTime
+        return total / 10_000_000
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 def _powershell(body: str, *, functions: tuple[str, ...] = (), timeout: int = 180) -> dict:
     """Run the backend's own functions (all of them unless named) and return the last JSON line."""
 
@@ -153,35 +179,37 @@ class ReviewCopyAlongsideTheTranscriptionTests(unittest.TestCase):
                 # The first suspend compiles a small helper; do that before measuring.
                 Set-MMProcessTreeSuspended -Process $busy -Suspended $false
                 Start-Sleep -Milliseconds 500
-                $busy.Refresh()
-                $before = $busy.TotalProcessorTime.TotalSeconds
-                [System.IO.File]::WriteAllText('{control}.waiting', 'x')
+                [System.IO.File]::WriteAllText('{control}.waiting', [string]$busy.Id)
                 $paused = Wait-MMWhilePaused -Where 'test'
-                $busy.Refresh()
-                $during = $busy.TotalProcessorTime.TotalSeconds - $before
                 Stop-Process -Id $busy.Id -Force
-                [Console]::Out.WriteLine((@{{ paused = $paused; during = $during }} | ConvertTo-Json -Compress))
+                [Console]::Out.WriteLine((@{{ paused = $paused }} | ConvertTo-Json -Compress))
             """
             source_body = textwrap.dedent(body)
-            process = None
-            try:
-                import threading
+            measured: dict[str, float] = {}
+            import threading
 
-                def resume() -> None:
-                    # Three seconds after the pause has begun, however long the start took.
-                    waiting = control.with_name(control.name + ".waiting")
-                    deadline = time.monotonic() + 120
-                    while not waiting.exists() and time.monotonic() < deadline:
-                        time.sleep(0.1)
-                    time.sleep(3)
-                    control.write_text(json.dumps({"pause": False, "skip": []}), encoding="utf-8")
+            def resume() -> None:
+                # The stand-in's processor time is read twice inside the pause, after it has surely begun and before
+                # Resume, so the moments a busy PC adds before the freeze and after the resume are never counted:
+                # only the pause itself is measured (it used to be measured from before the pause to after it).
+                waiting = control.with_name(control.name + ".waiting")
+                deadline = time.monotonic() + 120
+                while not waiting.exists() and time.monotonic() < deadline:
+                    time.sleep(0.1)
+                time.sleep(0.2)
+                pid = int(waiting.read_text(encoding="utf-8").strip() or 0)
+                time.sleep(1.5)
+                first = _processor_seconds(pid)
+                time.sleep(2.0)
+                measured["during"] = _processor_seconds(pid) - first
+                control.write_text(json.dumps({"pause": False, "skip": []}), encoding="utf-8")
 
-                threading.Thread(target=resume, daemon=True).start()
-                result = _powershell(source_body)
-            finally:
-                del process
-        self.assertGreater(result["paused"], 2.0)
-        self.assertLess(result["during"], 0.5, "the copy kept working while the run was paused")
+            resumer = threading.Thread(target=resume, daemon=True)
+            resumer.start()
+            result = _powershell(source_body)
+            resumer.join(10)
+        self.assertGreater(result["paused"], 3.0)
+        self.assertLess(measured["during"], 0.05, "the copy kept working while the run was paused")
 
     def test_a_whole_run_leaves_one_finished_copy_per_narrated_recording_and_nothing_half_written(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

@@ -33,7 +33,18 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from media_manglers.core import cross_track_check, sparse_narration as sn  # noqa: E402
 from media_manglers.providers import whisper_local  # noqa: E402
-from tests.whisper_test_models import checked_whisper  # noqa: E402
+from tests.whisper_test_models import checked_whisper, whisper_gets_file_names  # noqa: E402
+
+# H2 of the Wave I-A review: these Whisper stand-ins answer by the file they are given; see whisper_gets_file_names.
+_FILE_NAMES = whisper_gets_file_names()
+
+
+def setUpModule() -> None:  # noqa: N802 - unittest's name
+    _FILE_NAMES.start()
+
+
+def tearDownModule() -> None:  # noqa: N802 - unittest's name
+    _FILE_NAMES.stop()
 
 FFMPEG = shutil.which("ffmpeg")
 GIT = shutil.which("git")

@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from media_manglers.core import activity_timeline, app_cache, raw_bin_library, recording_identity, user_folders, voice_track  # noqa: E402
 from media_manglers.core.review_inbox import sampled_sha256_file  # noqa: E402
+from tests.whisper_test_models import install_models  # noqa: E402
 
 FFMPEG = shutil.which("ffmpeg")
 FFPROBE = shutil.which("ffprobe")
@@ -586,6 +587,61 @@ class ScanTests(unittest.TestCase):
             self.assertFalse(busy.exists(), "once its scan has gone, the folder is a leftover")
         finally:
             shutil.rmtree(busy, ignore_errors=True)
+
+    def _scan_with_whisper(self, missing: tuple[str, ...]) -> tuple[dict, list[str], list[str]]:
+        """A scan that loads its model through the shared loader (no transcriber handed in), with Whisper stood in
+        for: a model table, and this test's own model cache holding every model but ``missing``. Returns the summary,
+        the recordings it began to read and the models Whisper was asked to load."""
+
+        read: list[str] = []
+        loads: list[str] = []
+
+        class _Whisper:
+            @staticmethod
+            def load_model(name, device=None, download_root=None, **_options):
+                loads.append(name)
+                return mock.Mock()
+
+        real_examine = raw_bin_library.examine
+
+        def examine(path, *args, **kwargs):
+            read.append(Path(path).name)
+            return real_examine(path, *args, **kwargs)
+
+        with mock.patch.dict(os.environ, {"XDG_CACHE_HOME": str(self.root / "xdg-cache")}):
+            _Whisper._MODELS = install_models(missing=missing)
+            with mock.patch.dict(sys.modules, {"whisper": _Whisper()}), \
+                    mock.patch.object(raw_bin_library, "examine", side_effect=examine):
+                summary = raw_bin_library.scan(raw_bin_library.ScanOptions(
+                    folders=[str(self.raw)], ffmpeg=FFMPEG, ffprobe=FFPROBE, library_root=str(self.library),
+                    cache_folder=str(self.cache), stable_after_seconds=0))
+        return summary, read, loads
+
+    def test_a_model_not_approved_stops_the_scan_before_the_first_recording_is_read(self) -> None:
+        # Installer plan, Stage 3 (review M4): the scan's model is checked once, before any recording is read, not
+        # when the first recording with sound has been read whole.
+        make_recording(self.raw / "a.mkv")
+        make_recording(self.raw / "b.mkv")
+        summary, read, loads = self._scan_with_whisper(missing=("base.en",))
+        self.assertEqual(summary["status"], "model_not_approved")
+        self.assertIn("The Whisper model base.en is not on this PC yet", summary["message"])
+        self.assertEqual(read, [], "no recording was read")
+        self.assertEqual((summary["files_read"], summary["bytes_read"]), (0, 0))
+        self.assertEqual(loads, [], "Whisper was never asked for a model")
+        self.assertEqual(self._rows(), [])
+
+    def test_a_scan_with_nothing_to_listen_to_does_not_ask_for_its_model(self) -> None:
+        # Nothing new to read, or only a known recording moved (a hash-only read): no model is loaded, so none is
+        # asked for.
+        recording = make_recording(self.raw / "a.mkv")
+        self._scan()
+        summary, read, loads = self._scan_with_whisper(missing=("base.en",))
+        self.assertEqual((summary["status"], summary["unchanged"], read), ("completed", 1, []))
+        moved = self.raw / "renamed" / "b.mkv"
+        moved.parent.mkdir()
+        recording.rename(moved)
+        summary, read, loads = self._scan_with_whisper(missing=("base.en",))
+        self.assertEqual((summary["status"], summary.get("reattached"), read, loads), ("completed", 1, [], []))
 
     def test_one_backup_a_day_through_sqlite_and_the_newest_are_kept(self) -> None:
         from datetime import date, timedelta

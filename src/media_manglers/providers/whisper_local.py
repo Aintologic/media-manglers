@@ -6,11 +6,14 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 import json
 import os
+import shutil
+import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
 from typing import Any
+import wave
 
 from media_manglers.core.sparse_narration import (
     SHORT_REACTION_REASON,
@@ -266,6 +269,7 @@ def _run_transcription(
     progress_callback: Callable[[str, str, str, dict[str, Any] | None], None] | None = None,
     keep_short_reactions: bool = False,
     report_work_units: bool = False,
+    ffmpeg_exe: str = "",
 ) -> tuple[dict[str, Any], str, bool, str]:
     import whisper
 
@@ -344,7 +348,7 @@ def _run_transcription(
                     "temperature": (0.0, 0.2, 0.4),
                 }
                 seed_whisper_decoder()
-                first = model.transcribe(str(chunk_path), **sparse_kwargs)
+                first = model.transcribe(whisper_audio(chunk_path, ffmpeg_exe), **sparse_kwargs)
                 detected_language = str(first.get("language") or detected_language)
                 raw_first_segments = offset_segments(first.get("segments") or [], interval.start_seconds)
                 first_segments, first_filtered = filter_sparse_decoder_segments(
@@ -380,7 +384,7 @@ def _run_transcription(
                         if retry_kwargs.get("initial_prompt") is None:
                             retry_kwargs.pop("initial_prompt", None)
                         seed_whisper_decoder()
-                        retry = model.transcribe(str(chunk_path), **retry_kwargs)
+                        retry = model.transcribe(whisper_audio(chunk_path, ffmpeg_exe), **retry_kwargs)
                         raw_retry_segments = offset_segments(retry.get("segments") or [], interval.start_seconds)
                         retry_segments, retry_filtered = filter_sparse_decoder_segments(
                             raw_retry_segments, context_segments=accepted_segments,
@@ -510,7 +514,7 @@ def _run_transcription(
                 pass
         else:
             seed_whisper_decoder()
-            result = model.transcribe(audio_path, **transcribe_kwargs)
+            result = model.transcribe(whisper_audio(audio_path, ffmpeg_exe), **transcribe_kwargs)
             # 199: lines Whisper invents (stock phrases, phrase loops) are dropped here too, by
             # their words only. Decoder numbers alone never drop a line in this mode, so quiet
             # narration that scores like noise is kept.
@@ -578,6 +582,61 @@ def _run_transcription(
 
     result, fp16 = run("cpu")
     return result, "cpu", fp16, gpu_error
+
+
+WHISPER_SAMPLE_RATE = 16000
+
+
+def whisper_ffmpeg(ffmpeg_exe: str = "") -> str:
+    """The FFmpeg that decodes sound for Whisper when the app has not read it itself: the one the request names (the
+    chosen or bundled FFmpeg the app resolved), else Media Manglers' own beside our Python, else one on PATH. Never
+    the bare name ``ffmpeg`` left for Windows to look up."""
+
+    if ffmpeg_exe and Path(ffmpeg_exe).is_file():
+        return str(ffmpeg_exe)
+    try:
+        from media_manglers.core.private_runtime import FFMPEG_FOLDER, is_private_python, runtime_folder  # noqa: PLC0415
+
+        if is_private_python():
+            bundled = runtime_folder() / FFMPEG_FOLDER / "bin" / "ffmpeg.exe"
+            if bundled.is_file():
+                return str(bundled)
+    except Exception:  # noqa: BLE001 - only a lookup
+        pass
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+    raise FileNotFoundError("FFmpeg was not found, so this sound could not be read for Whisper. Check the FFmpeg row "
+                            "in Settings > Dependencies.")
+
+
+def whisper_audio(path: str | os.PathLike[str], ffmpeg_exe: str = "") -> Any:
+    """The sound Whisper transcribes, read by the app, so Whisper never starts FFmpeg itself (H2 of the Wave I-A
+    review). Given a file name, Whisper starts the bare command ``ffmpeg`` found on PATH: on a PC with only the
+    FFmpeg Media Manglers ships, or a chosen one that is not on PATH, it failed; with another on PATH it used that one.
+
+    The 16 kHz mono 16-bit WAV the app wrote (``voice_track.extract_wav`` and the chunks cut from it) is read as it
+    is, sample for sample what Whisper's own decode of it gives, so transcripts are unchanged. Any other sound is
+    decoded exactly as Whisper decodes it, by the FFmpeg the app resolved (``whisper_ffmpeg``)."""
+
+    import numpy as np  # type: ignore[import-not-found]
+
+    try:
+        with wave.open(str(path), "rb") as reader:
+            if (reader.getnchannels(), reader.getsampwidth(), reader.getframerate(), reader.getcomptype()) == (
+                    1, 2, WHISPER_SAMPLE_RATE, "NONE"):
+                frames = reader.readframes(reader.getnframes())
+                return np.frombuffer(frames, "<i2").flatten().astype(np.float32) / 32768.0
+    except (wave.Error, EOFError, OSError):
+        pass
+    command = [whisper_ffmpeg(ffmpeg_exe), "-nostdin", "-threads", "0", "-i", str(path), "-f", "s16le", "-ac", "1",
+               "-acodec", "pcm_s16le", "-ar", str(WHISPER_SAMPLE_RATE), "-"]
+    result = subprocess.run(command, capture_output=True, check=False,
+                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    if result.returncode != 0:
+        raise RuntimeError(f"The sound could not be read for Whisper: "
+                           f"{result.stderr.decode('utf-8', 'replace').strip()[-400:]}")
+    return np.frombuffer(result.stdout, "<i2").flatten().astype(np.float32) / 32768.0
 
 
 def pick_whisper_device(prefer_gpu: bool) -> str:
@@ -675,6 +734,8 @@ def transcribe_from_request(payload: dict[str, Any]) -> dict[str, Any]:
     model_name = str(payload.get("model_name") or "")
     language_code = str(payload.get("language_code") or "")
     ffmpeg_dir = str(payload.get("ffmpeg_dir") or "")
+    # H2 of the Wave I-A review: the FFmpeg the app resolved, for sound the app does not read itself.
+    ffmpeg_exe = str(payload.get("ffmpeg_exe") or (Path(ffmpeg_dir) / "ffmpeg.exe" if ffmpeg_dir else ""))
     prefer_gpu = bool(payload.get("prefer_gpu", False))
     task_name = str(payload.get("task_name") or "transcribe")
     initial_prompt = str(payload.get("initial_prompt") or "")
@@ -790,6 +851,7 @@ def transcribe_from_request(payload: dict[str, Any]) -> dict[str, Any]:
             progress_callback=set_progress,
             keep_short_reactions=keep_short_reactions,
             report_work_units=progress_work_units,
+            ffmpeg_exe=ffmpeg_exe,
         )
         if gpu_error:
             progress_state["gpu_error"] = gpu_error

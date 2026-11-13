@@ -252,7 +252,10 @@ class SelectPythonTests(unittest.TestCase):
 
     def test_translation_needs_argos(self) -> None:
         self.assertTrue(translation_needs_argos({"translate_to": "de", "processing_mode": "Local"}))
-        self.assertTrue(translation_needs_argos({"translate_to": "de", "processing_mode": "Hybrid"}))
+        # M13 of the Wave I-A review: Argos runs only in Local mode, and only for a target other than English.
+        self.assertFalse(translation_needs_argos({"translate_to": "de", "processing_mode": "Hybrid"}))
+        self.assertFalse(translation_needs_argos({"translate_to": "en", "processing_mode": "Local"}))
+        self.assertTrue(translation_needs_argos({"translate_to": "en,de", "processing_mode": "Local"}))
         self.assertTrue(translation_needs_argos({"translate_to": "de"}))
         self.assertFalse(translation_needs_argos({"translate_to": "de", "processing_mode": "AI"}))
         self.assertFalse(translation_needs_argos({"translate_to": "", "processing_mode": "Local"}))
@@ -353,7 +356,8 @@ class BackendAgreesTests(unittest.TestCase):
                     self.assertEqual(found[name]["note"], note)
 
     def test_the_backend_rule_for_local_translation_matches(self) -> None:
-        cases = [(["de"], "Local"), (["de"], "Hybrid"), (["de"], ""), (["de"], "AI"), ([], "Local")]
+        cases = [(["de"], "Local"), (["de"], "Hybrid"), (["de"], ""), (["de"], "AI"), ([], "Local"), (["en"], "Local"),
+                 (["en", "de"], "Local"), (["en"], "Hybrid")]
         lines = "\n".join(
             f"[Console]::Out.WriteLine([string](Test-TranslationNeedsArgos -TranslationTargets @({', '.join(repr(t) for t in targets)}) -Mode '{mode}'))"
             for targets, mode in cases)

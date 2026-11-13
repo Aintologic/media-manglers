@@ -430,7 +430,9 @@ class BugReportsPageTests(unittest.TestCase):
         self.assertIn("graphics card", notice)
         self.assertIn("much slower", notice)
         self.assertIn('speech model "medium" on this PC is damaged', notice)
-        self.assertIn(f"rename {model} to medium.pt.bad", notice)
+        # L2 of the Wave I-A review: the approval route, never "rename the file so Whisper fetches a fresh copy".
+        self.assertIn("approve its download in Settings > Dependencies", notice)
+        self.assertNotIn("rename", notice)
         self.assertIn(notice, page.results_detail.text())
         # A new run starts without the old notice.
         ScriptedBackend.lines = [OUTCOME % ("a.mkv", "transcribed", "false", "completed", "a.mkv")]

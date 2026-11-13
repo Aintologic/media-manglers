@@ -10,6 +10,7 @@ import threading
 import time
 from typing import Callable, Iterable
 
+from .child_jobs import keep_with_workbench
 from .command_builder import CommandSpec
 
 
@@ -173,6 +174,9 @@ class SubprocessRunner:
             )
         except OSError as exc:
             return RunnerResult(status="failed", exit_code=None, error=str(exc))
+        # M15 of the Wave I-A review: the run, and every program it starts, ends with this Workbench, however the
+        # Workbench ends, so a crash never leaves a hidden or paused run holding the running lock.
+        keep_with_workbench(process)
 
         with self._lock:
             self._process = process

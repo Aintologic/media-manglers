@@ -10,7 +10,9 @@ child of the test: the app's file helpers must count it as another program, not 
 
 With ``--watch-folder`` (installer plan, Stage 2) it behaves like an on-access virus scanner: it watches ``path``,
 a folder, and opens every new file that appears in it (and below it) for ``--hold-ms`` milliseconds with no delete
-sharing, one after another, until it is let go; at the end it prints ``SCANNED <count>``.
+sharing, one after another, until it is let go; at the end it prints ``SCANNED <count>``. It says ``HELD`` only once
+its watcher has really started looking (a test that makes files before that would race it under load), and prints
+``OPENED <count>`` each time it opens a file, so a test can wait until the scanner has its hands on one.
 
 ``OutsideHolder`` starts and drives it from a test.
 """
@@ -87,10 +89,14 @@ class _Scanner:
         self.seen = {str(path) for path in folder.rglob("*")} if folder.is_dir() else set()
         self.count = 0
         self.stop = threading.Event()
+        self.watching = threading.Event()
         self.thread = threading.Thread(target=self._watch, daemon=True)
         self.thread.start()
+        # Ready only once the watcher's own thread runs: under heavy load it may otherwise start after the test's steps.
+        self.watching.wait(30)
 
     def _watch(self) -> None:
+        self.watching.set()
         while not self.stop.is_set():
             try:
                 found = [path for path in self.folder.rglob("*") if str(path) not in self.seen]
@@ -105,6 +111,7 @@ class _Scanner:
                 except OSError:
                     continue  # already moved or removed: a scanner simply misses it
                 self.count += 1
+                print(f"OPENED {self.count}", flush=True)
                 time.sleep(self.hold)
                 held.close()
             time.sleep(0.01)
@@ -170,6 +177,28 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def _wait_ended(pid: int, seconds: float) -> None:
+    """Return once process ``pid`` has ended (or after ``seconds``)."""
+
+    if os.name != "nt":
+        return
+    import ctypes  # noqa: PLC0415
+    from ctypes import wintypes  # noqa: PLC0415
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = kernel32.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+    if not handle:
+        return  # already gone
+    try:
+        kernel32.WaitForSingleObject(handle, int(seconds * 1000))
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 class OutsideHolder:
     """Start the holder on ``path`` and wait until the hold is real. ``outside=False`` starts it as a child of
     the test, which the app counts as its own."""
@@ -211,6 +240,8 @@ class OutsideHolder:
         self.process.stdin.write("release\n")
         self.process.stdin.flush()
         line = self._line(15)
+        while line.startswith("OPENED "):
+            line = self._line(15)
         if line.startswith("SCANNED "):
             # A watcher reports how many files it opened before it lets go.
             self.scanned = int(line.split()[1])
@@ -218,6 +249,13 @@ class OutsideHolder:
         if line != "RELEASED":
             raise RuntimeError(f"The holder did not let go: {line!r}")
         self.released = True
+
+    def wait_opened(self, seconds: float = 30) -> None:
+        """For a watcher: return once it has opened a new file (it is holding it now, or has just let it go)."""
+
+        line = self._line(seconds)
+        if not line.startswith("OPENED "):
+            raise RuntimeError(f"The scanner opened no new file in time: {line!r}")
 
     def wait_released(self, seconds: float = 15) -> None:
         """For a timed hold: return once the holder says it let go."""
@@ -232,6 +270,9 @@ class OutsideHolder:
                 os.kill(self.pid, signal.SIGTERM)  # TerminateProcess on Windows
             except OSError:
                 pass
+            # Ending a process is not instant, and the holder is not this object's child (the launcher is): wait until
+            # it has really ended and let go, so a test's clean-up never meets the file still held.
+            _wait_ended(self.pid, 15)
             self.released = True
         for stream in (self.process.stdin, self.process.stdout):
             try:
