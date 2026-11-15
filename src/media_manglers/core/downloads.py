@@ -11,7 +11,9 @@ model the operator approves. One way, with all of the care:
 - the bytes go to ``<name>.partial`` beside the final name, are flushed to the disk, are checked against the
   SHA-256 the file was pinned to, and only then are given their name (``safe_write.place_checked``, the new file
   steps' rules from Stage 2). A file that does not match is removed and never looks like the real one;
-- what an interrupted download left is never reused; a short network failure is tried again a few times.
+- what an interrupted download left is never reused, but a whole one that already matches its pin (a download that
+  stopped only at its last step, the move into place) is put in place rather than fetched again; a short network
+  failure is tried again a few times.
 """
 
 from __future__ import annotations
@@ -152,6 +154,17 @@ def has_checked_copy(target: str | os.PathLike[str], sha256: str) -> bool:
         return False
 
 
+def _finished_partial(partial: Path, sha256: str, size: int = 0) -> bool:
+    """Whether ``partial`` is a whole download that already matches its pin (and its size, when given)."""
+
+    try:
+        if not partial.is_file() or (size and partial.stat().st_size != size):
+            return False
+    except OSError:
+        return False
+    return has_checked_copy(partial, sha256)
+
+
 def _transient(exc: BaseException) -> bool:
     import http.client  # noqa: PLC0415
     import urllib.error  # noqa: PLC0415
@@ -195,9 +208,14 @@ def download_file(url: str, target: str | os.PathLike[str], sha256: str, *, size
         raise DownloadFailed(f"{name} has no pinned checksum, so it is not downloaded.")
     target.parent.mkdir(parents=True, exist_ok=True)
     partial = target.with_name(target.name + PARTIAL_SUFFIX)
+    if _finished_partial(partial, sha256, size):
+        # M8 of the Wave I-A review: a download that finished and was checked, but could not be put in place (a
+        # program held the old file at the last step), is put in place now, never fetched again.
+        return safe_write.place_checked(partial, target, sha256, replace=replace,
+                                        budget=budget or safe_write.StepBudget())
     for attempt in range(1, max(1, attempts) + 1):
         if os.path.lexists(partial):
-            # What an interrupted download left is never reused.
+            # What an interrupted download left is never reused: only a whole one that matches its pin is.
             safe_write.remove(partial, budget=safe_write.StepBudget())
         try:
             written = _fetch(url, partial, opener=opener, progress=progress, size=size)

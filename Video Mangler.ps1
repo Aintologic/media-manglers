@@ -166,6 +166,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# M14 of the Wave I-A review: no Python this script starts writes compiled bytecode, so nothing is written into a
+# Python already on the PC, nor Media Manglers' own compiled code into the application folder (this process only).
+$env:PYTHONDONTWRITEBYTECODE = "1"
 # Installer plan, Stage 2: every Media Manglers entry point holds this lock while it runs, so the installer can see
 # Media Manglers is running and ask for it to be closed (src\media_manglers\core\app_locks.py). It never stops
 # anything from starting, and Windows lets go of it when this PowerShell ends.
@@ -905,9 +908,14 @@ function Resolve-DefaultInputOutputFolders {
 function Get-YtDlpInstallCommands {
     param([string]$PythonCommand)
 
+    # L14 of the Wave I-A review: Media Manglers' own Python has no pip and is never changed, so no pip line for it;
+    # for any other Python the line is one PowerShell runs as pasted, the path quoted.
+    if ([string]::IsNullOrWhiteSpace($PythonCommand) -or (Test-MediaManglersOwnPython -PythonCommand $PythonCommand)) {
+        return @("winget install --id yt-dlp.yt-dlp -e")
+    }
     return @(
         "winget install --id yt-dlp.yt-dlp -e",
-        "$PythonCommand -m pip install -U yt-dlp"
+        ("& {0} -m pip install -U yt-dlp" -f (Quote-Argument $PythonCommand))
     )
 }
 
@@ -1915,13 +1923,16 @@ function Get-BundledToolPath {
     return ""
 }
 
-# Installer plan, Stage 1: translation runs locally with Argos when a target language is set and the mode
-# is Local or Hybrid (an unset mode is Local). The Workbench's rule is dependencies.translation_needs_argos.
+# Installer plan, Stage 1: translation runs locally with Argos when the mode is Local (an unset mode is Local) and a
+# target language other than English is set: English comes from Whisper's own translation, Hybrid translates to
+# English only, and AI without Argos (M13 of the Wave I-A review). The Workbench's rule is
+# dependencies.translation_needs_argos.
 function Test-TranslationNeedsArgos {
     param([string[]]$TranslationTargets, [string]$Mode = "")
 
-    $targets = @($TranslationTargets | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
-    return ($targets.Count -gt 0) -and (@("", "local", "hybrid") -contains ([string]$Mode).Trim().ToLowerInvariant())
+    $targets = @($TranslationTargets | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } |
+            ForEach-Object { ([string]$_).Trim().ToLowerInvariant() } | Where-Object { $_ -ne "en" })
+    return ($targets.Count -gt 0) -and (@("", "local") -contains ([string]$Mode).Trim().ToLowerInvariant())
 }
 
 function Get-ToolStandardLocations {
@@ -2287,6 +2298,14 @@ function Get-AutoPythonInterpreterCandidates {
                     $candidates.Add((Resolve-Path -LiteralPath $trimmedMatch).ProviderPath)
                 }
             }
+        }
+    }
+
+    # M11 of the Wave I-A review: and the folders Python's installers use, so this list and the Workbench's
+    # (dependencies.discover_python_candidates) are one list.
+    foreach ($standard in @(Get-ToolStandardLocations -Key "python")) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$standard)) {
+            $candidates.Add((Resolve-Path -LiteralPath $standard).ProviderPath)
         }
     }
 
@@ -3468,6 +3487,31 @@ function Set-MMProcessTreeSuspended {
     }
 }
 
+# M15 of the Wave I-A review: whether the Workbench that started this run (MEDIA_MANGLERS_APP_PROCESS, its process
+# number and start time, safe_write.mark_app_process) is still running. True for a run started without a Workbench.
+function Test-MMStartingAppAlive {
+    $marker = [string]$env:MEDIA_MANGLERS_APP_PROCESS
+    if ([string]::IsNullOrWhiteSpace($marker) -or $marker -notmatch '^(\d+):(\d+)$') { return $true }
+    $appId = [int]$Matches[1]
+    $appStarted = [int64]$Matches[2]
+    try {
+        $app = Get-Process -Id $appId -ErrorAction Stop
+        # An ended process can still be found while another program holds a handle to it.
+        if ($app.HasExited) { return $false }
+    }
+    catch {
+        return $false
+    }
+    if ($appStarted -le 0) { return $true }
+    try {
+        # A process number Windows gave to another program after the Workbench ended is not the Workbench.
+        return ($app.StartTime.ToFileTimeUtc() -eq $appStarted)
+    }
+    catch {
+        return $true
+    }
+}
+
 function Wait-MMWhilePaused {
     # 115: hold here while the operator has paused the run. A running tool
     # is suspended, so it stops using the CPU and GPU until Resume.
@@ -3486,8 +3530,23 @@ function Wait-MMWhilePaused {
     Write-Log ("Paused by you{0}. The run continues when you press Resume." -f $whereText) "INFO"
     Write-Host "  Paused. Press Resume in the Workbench to continue." -ForegroundColor Yellow
     $nextBeat = Get-Date
+    $nextLook = Get-Date
     try {
         while (Test-MMPauseRequested) {
+            if ((Get-Date) -ge $nextLook) {
+                # M15 of the Wave I-A review: a Resume can only come from the Workbench that started this run. When
+                # it is gone (a crash, or ended from Task Manager), the paused run ends here, with the tools it
+                # froze, and lets go of the running lock, instead of waiting for ever.
+                $nextLook = (Get-Date).AddSeconds(2)
+                if (-not (Test-MMStartingAppAlive)) {
+                    Write-Log "The Workbench that started this run has closed, so the paused run ends here. Nothing that was finished is lost; start it again from the Workbench." "WARN"
+                    if ($null -ne $Process) { Stop-MMProcessTree -Process $Process }
+                    foreach ($tool in $backgroundTools) { Stop-MMProcessTree -Process $tool }
+                    $Process = $null
+                    $backgroundTools = @()
+                    exit 3
+                }
+            }
             if ((Get-Date) -ge $nextBeat) {
                 # 224 (Wave B2b): a pause is a state of its own, so it says so (a heartbeat would keep the step's words).
                 Write-MMProgressV1 -Phase ([string]$script:MMProgressPhase) -ProgressKind indeterminate -Activity "Paused by you"
@@ -5845,9 +5904,29 @@ function Get-SupportedVideoExtensions {
     return @(".mp4", ".mov", ".mkv", ".avi", ".m4v", ".webm")
 }
 
+# Installer plan, Stage 1: whether a Python is Media Manglers' own, python.exe or pythonw.exe in runtime\python of a
+# packaged application folder (the folder that holds this script). The helper's rule is private_runtime.is_private_python.
+function Test-MediaManglersOwnPython {
+    param([string]$PythonCommand)
+
+    if ([string]::IsNullOrWhiteSpace($PythonCommand) -or -not (Test-Path -LiteralPath $PythonCommand -PathType Leaf)) {
+        return $false
+    }
+    $file = Get-Item -LiteralPath $PythonCommand
+    $pythonFolder = $file.Directory
+    if (@("python.exe", "pythonw.exe") -notcontains $file.Name.ToLowerInvariant() -or
+        $pythonFolder.Name -ne "python" -or $null -eq $pythonFolder.Parent -or $pythonFolder.Parent.Name -ne "runtime" -or
+        $null -eq $pythonFolder.Parent.Parent) {
+        return $false
+    }
+    return (Test-Path -LiteralPath (Join-Path $pythonFolder.Parent.Parent.FullName "Video Mangler.ps1") -PathType Leaf)
+}
+
 function Test-PythonWhisper {
     param([string]$PythonCommand)
 
+    # Our own Python finds Whisper in the speech libraries downloaded at first launch: a start-up hook in its own
+    # site-packages adds them in every process, so this bare import sees them (H1 of the Wave I-A review).
     $result = Invoke-ExternalCapture `
         -FilePath $PythonCommand `
         -Arguments @("-c", "import whisper; print('whisper_ok')") `
@@ -5855,6 +5934,10 @@ function Test-PythonWhisper {
         -IgnoreExitCode
 
     if ($result.ExitCode -ne 0 -or $result.StdOut -notmatch 'whisper_ok') {
+        if (Test-MediaManglersOwnPython -PythonCommand $PythonCommand) {
+            # Our Python has no pip and is never changed: the speech libraries come only from the setup.
+            throw "Speech recognition is not set up yet, so Local Whisper cannot run. In the Workbench, open Settings > Dependencies and choose Set up on the Speech recognition row, then try again."
+        }
         throw "Python/openai-whisper not available via '$PythonCommand'. Install with: py -m pip install -U openai-whisper (official page: $((Get-ToolSource -Key 'whisper').Page))"
     }
 }
@@ -10368,13 +10451,22 @@ function Get-TranslationProviderPreflightNotes {
         return @()
     }
 
+    if (Test-MediaManglersOwnPython -PythonCommand $PythonCommand) {
+        # M13 of the Wave I-A review: our own Python has no pip and is never changed, so no install command for it.
+        $ownMessage = "Local translation to a language other than English needs Argos Translate, which Media Manglers' own Python does not include and never installs. Use a Python of your own that has Argos Translate (choose it on the Python row in Settings > Dependencies), translate to English, or run in AI mode (-ProcessingMode AI)."
+        if (-not $InteractiveMode) {
+            throw $ownMessage
+        }
+        return @($ownMessage)
+    }
+
     $messageLines = @(
         "Local translation was selected for one or more non-English targets, but Argos Translate is not installed on this PC.",
         "Argos Translate is required for the Local path when the target language is not English.",
-        "Install it with:",
-        ("  {0} -m pip install argostranslate" -f (Quote-Argument $PythonCommand)),
+        "Install it into this Python with (PowerShell):",
+        ("  & {0} -m pip install argostranslate" -f (Quote-Argument $PythonCommand)),
         "Once the source language is detected, Media Manglers can then prepare the needed Argos language packages.",
-        "You can also rerun with -ProcessingMode AI."
+        "You can also translate to English, or rerun with -ProcessingMode AI."
     )
 
     if (-not $InteractiveMode) {
@@ -10729,6 +10821,11 @@ function Ensure-ArgosTranslationSupport {
 
     if ($probe.CanTranslate) {
         return "ready"
+    }
+    if (-not $probe.ModuleInstalled -and (Test-MediaManglersOwnPython -PythonCommand $PythonCommand)) {
+        # M13 of the Wave I-A review: Media Manglers' own Python is never changed, so nothing is offered to install
+        # into it, even in the console.
+        throw "Local translation to a language other than English needs Argos Translate, which Media Manglers' own Python does not include and never installs. Use a Python of your own that has Argos Translate (-PythonExe), translate to English, or run in AI mode (-ProcessingMode AI)."
     }
 
     $sourceDisplayName = Get-LanguageDisplayName -Code $sourceCode
@@ -19318,6 +19415,17 @@ if (($ProcessingMode -eq "Local" -or ($ProcessingMode -eq "AI" -and $OpenAiProje
 }
 
 $translationProviderPreflightNotes = @()
+# M13 of the Wave I-A review: the Argos exception is applied before the translation check, not after it: when our own
+# Python is the one given by default and a Python on this PC has Argos Translate (with the helper and Whisper), that
+# one runs this translation, exactly as the later choice of Python keeps it.
+if ($translationTargets.Count -gt 0 -and -not $pythonLauncherWasExplicit -and
+    (Test-TranslationNeedsArgos -TranslationTargets $translationTargets -Mode $ProcessingMode) -and
+    (Test-MediaManglersOwnPython -PythonCommand $PythonExe)) {
+    $argosSelection = Select-PreferredWhisperPythonInterpreter -PrimaryPythonCommand $PythonExe -TranslationNeedsArgos
+    if ($argosSelection -and -not [string]::IsNullOrWhiteSpace([string]$argosSelection.Path)) {
+        $PythonExe = [string]$argosSelection.Path
+    }
+}
 if ($translationTargets.Count -gt 0) {
     $translationProviderPreflightNotes = @(Get-TranslationProviderPreflightNotes `
             -EffectiveProvider $TranslationProvider `

@@ -164,6 +164,10 @@ waveforms already.
 - `This recording has no sound to show.` The file has no audio track.
 - `The sound of this recording could not be measured.` The file could not be
   read. The video still plays.
+- `No Next speech yet: it needs the Whisper model base.en. Approve its download in Settings > Dependencies.`
+  The waveforms are there, but finding where speech starts needs that model,
+  and a background job never downloads one. Once you approve it and it has
+  downloaded, the recording is listened to by itself, with no restart.
 
 Right-click the lanes and choose **Measure the sound again** to measure the
 whole recording again from the start. For a recording the raw bin library has

@@ -162,6 +162,20 @@ def checked_model_file(name: str, *, table: dict[str, str] | None = None) -> Pat
     return Path(found.path)
 
 
+def refuse_unapproved(models: list[str] | tuple[str, ...]) -> None:
+    """``ModelNotApproved`` at once for the first of ``models`` not on this PC as Whisper published it, by the same
+    check the loader uses, so a feature stops before the work that needs the model, not after it (M4 of the Wave I-A
+    review: Prepare and the raw bin scan). Without Whisper in this Python there is nothing to check against, and its
+    loader says so itself; a model named by its file's path is loaded from that file, as the loader does."""
+
+    table = model_table()
+    if not table:
+        return
+    for name in dict.fromkeys(str(model) for model in models if str(model or "").strip()):
+        if name in table or not os.path.isfile(name):
+            checked_model_file(name, table=table)
+
+
 # The approved download ------------------------------------------------------------------------------------------
 
 

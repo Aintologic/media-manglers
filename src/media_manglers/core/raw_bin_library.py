@@ -43,7 +43,7 @@ import tempfile
 import time
 from typing import Any, Callable, Iterable, Iterator
 
-from . import activity_timeline, app_cache, recording_identity, recording_records, speech_facts, voice_track
+from . import activity_timeline, app_cache, recording_identity, recording_records, safe_write, speech_facts, voice_track
 from .exports import write_csv, write_json
 from .recording_records import (  # noqa: F401 - the library's storage, kept under its old names here
     BACKUP_KEEP,
@@ -316,12 +316,22 @@ class _Control:
 
     def wait_while_paused(self, source: Path | None = None) -> None:
         self._read()
+        looked = self.clock()
         while bool(self.state.get("pause")):
             time.sleep(0.5)
             self.checked = -1e9
             self._read()
             if source is not None and self.skipped(source):
                 raise RecordingSkipped()
+            if self.clock() - looked >= 2.0:
+                # M15 of the Wave I-A review: only the Workbench that started this scan can resume it. When it is gone
+                # (a crash, or ended from Task Manager), the paused scan ends here and lets go of the running lock;
+                # what it finished is kept in the library.
+                looked = self.clock()
+                if not safe_write.starting_app_alive():
+                    print("The Workbench that started this scan has closed, so the paused scan ends here. What it "
+                          "finished is kept.", file=sys.stderr, flush=True)
+                    raise SystemExit(3)
 
 
 def _no_window() -> int:
@@ -997,6 +1007,19 @@ def scan(options: ScanOptions) -> dict[str, Any]:
                     continue
                 work.append((path, root_key, stat, known))
             connection.commit()
+            # Installer plan, Stage 3 (review M4): the scan's model is checked once, before the first recording is read,
+            # by the one check its loader uses, so a model not approved stops the scan at once, not after reading a
+            # whole recording. Only when the scan will listen: no transcriber handed in, and a recording it will read
+            # (one big enough to hold sound, not skipped, and not perhaps a known recording moved, which a hash-only
+            # read finds). Without Whisper in this Python there is nothing to check against; its loader says so itself.
+            if options.transcriber is None and any(
+                    int(stat.st_size) >= EMPTY_MAX_BYTES and not control.skipped(path)
+                    and not ((known is None or recording_records.is_stand_in(connection, known))
+                             and _moved_candidates(connection, int(stat.st_size), path_key(path)))
+                    for path, _root, stat, known in work):
+                from .whisper_models import refuse_unapproved  # noqa: PLC0415 - this check only
+
+                refuse_unapproved([options.model_name])
             total_bytes = sum(int(stat.st_size) for _path, _root, stat, _known in work)
             done_bytes = 0
             begun = time.monotonic()

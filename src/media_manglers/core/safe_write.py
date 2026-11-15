@@ -29,11 +29,18 @@ gets its real name only after it passed SQLite's damage check and holds every ta
 Installer plan, Stage 2: every NEW file step (a download put in place, the speech libraries unpacked into a
 temporary folder and renamed into place, older speech-library sets removed, the add-ons removed, data removed at
 uninstall) passes a ``StepBudget`` and follows stricter rules. The wait is measured by the clock: at most ten
-seconds per file and thirty seconds for the whole step. Every file of a folder is asked about, not only the first
-512. ``FileInUse`` carries the holders as a list (``Holder``), and the message names a program, a Windows service,
-or a Media Manglers that is still running, each in its own words. A read-only file, or one the app itself holds,
-stops at once. No message ever advises an exclusion or turning protection off. The app's older file steps keep
-their own waits until the next wave.
+seconds per file, counted from its first refusal, and thirty seconds for the whole step. Every file of a folder is
+asked about, not only the first 512. Asking Windows takes a few milliseconds per file (about a minute for a
+speech-library set), so the question runs beside the step, in parts, and the step keeps trying while Windows answers;
+it never waits past its limits for the answer, and it is always tried once more at the deadline (Wave I-A review,
+H4). The question is asked again at every refusal once the last one is answered, so a hold by the app itself stops
+the step at once even when it begins later. ``FileInUse`` carries the holders as a list (``Holder``), and the
+message names the file really held and a program, a Windows service, or a Media Manglers that is still running.
+A read-only file (the source or the file being replaced), or one the app itself holds, stops at once.
+
+No message ever advises closing, stopping, excluding or turning off the program that holds a file: Windows reports
+some virus scanners as ordinary programs, so a held file's message only names the program and says to wait a moment
+and try again (H3). The app's older file steps keep their own waits until the next wave, with the same words.
 """
 
 from __future__ import annotations
@@ -47,6 +54,7 @@ from pathlib import Path
 import shutil
 import sqlite3
 import stat
+import threading
 import time
 from typing import Any, Callable, Iterator, TypeVar
 from urllib.parse import quote
@@ -82,6 +90,20 @@ _RM_SERVICE = 3
 WORKBENCH_PROGRAM = "VideoManglerWorkbench.exe"
 # Restart Manager is asked about this many files at a time; a folder's files are all asked about, in parts.
 _RM_FILES_PER_CALL = 1000
+# The first files a new step's question names are asked about one at a time, so the message can name the file that
+# is really held: the step's own files, then a folder's likeliest (programs and libraries, then the largest).
+_ONE_AT_A_TIME = 8
+# A new step's question asks about a folder's other files this many at a time. Restart Manager opens the files it is
+# asked about for as long as it takes to answer (measured: a folder rename stays refused while it does), so the step
+# and the question take turns, and a part this size keeps each turn to a fraction of a second.
+_FILES_PER_QUESTION_PART = 100
+# The longest a try waits for the question's turn before it tries anyway.
+_TURN_WAIT_SECONDS = 0.25
+# How long a new step waits for a question's answer before it pauses: an answer about a file or two comes within it,
+# so the app's own hold stops the step before it waits at all; a folder's answer goes on beside the step.
+_ANSWER_GRACE_SECONDS = 0.5
+# Files a virus scanner looks at longest: programs and libraries.
+_PROGRAM_SUFFIXES = (".dll", ".pyd", ".exe", ".so", ".lib")
 
 
 @dataclass(frozen=True, slots=True)
@@ -339,6 +361,31 @@ def remove_disposable_tree(path: Path | str, *, within: Path | str, wait: float 
     _sweep_trash_beside(target, root, pause=pause, leftovers=leftovers)
 
 
+def remove_trash_beside(target: Path | str, *, within: Path | str, budget: StepBudget,
+                        pause: Callable[[float], None] | None = None) -> list[Path]:
+    """Remove, as a new file step, every trash folder an earlier removal left beside ``target`` (M10 of the Wave I-A
+    review): a removal cut short (a read-only file, a program that grabbed a file, the helper being stopped) leaves
+    the folder under its trash name. Returns what was removed. When something is still there, ``FileInUse`` or
+    ``FileStepRefused`` names it, so the caller never reports success while it is left."""
+
+    target, root = Path(target), Path(within)
+    try:
+        found = sorted(item for item in target.parent.iterdir() if item.name.startswith(TRASH_PREFIX))
+    except OSError:
+        return []
+    removed: list[Path] = []
+    for trash in found:
+        if not _strictly_within(root, trash):
+            continue
+        if trash.is_dir() and not trash.is_symlink():
+            _with_wait(lambda folder=trash: shutil.rmtree(folder), [trash], "removed", 0.0, pause, source=trash,
+                       deleting=True, budget=budget)
+        else:
+            remove(trash, pause=pause, budget=budget)
+        removed.append(trash)
+    return removed
+
+
 def _sweep_trash_beside(target: Path, root: Path, *, pause: Callable[[float], None] | None,
                         leftovers: Path | str | None) -> None:
     """Remove the trash folders beside ``target`` that an earlier delete left when it was cut short (224, Wave
@@ -560,51 +607,187 @@ def _with_wait(step: Callable[[], T], paths: list[Path], done: str, wait: float,
 
 def _with_budget(step: Callable[[], T], paths: list[Path], done: str, budget: StepBudget,
                  pause: Callable[[float], None] | None, *, source: Path | None = None, deleting: bool = False) -> T:
-    """Stage 2's wait for a new file step: by the clock, at most ``budget``'s time for this file and for the step;
-    the holders asked at the first refusal and at the deadline; a read-only file or the app's own hold stops at
-    once."""
+    """Stage 2's wait for a new file step: by the clock, at most ``budget``'s time for this file (from its first
+    refusal) and for the step; a read-only file or the app's own hold stops at once.
 
-    deadline = budget.file_deadline()
-    asked = False
+    Who holds the files is asked beside the step (``_HolderQuestion``): the step keeps trying while Windows answers,
+    the two take turns (Restart Manager opens the files it is asked about, and Windows refuses the step while it
+    does), a new question starts at a refusal once the last one is answered, and the deadline never waits for an
+    answer. At the deadline the step is tried once more, then the message names what the latest answer found (H4
+    and M9 of the Wave I-A review)."""
+
+    sleep = pause or time.sleep
+    deadline: float | None = None
+    question: _HolderQuestion | None = None
+    answered: _HolderQuestion | None = None
+    last_try = False
     index = 0
-    while True:
-        try:
-            return step()
-        except OSError as exc:
-            read_only = _read_only_path(exc, paths)
-            if read_only is not None:
-                raise _read_only_refusal(read_only, done) from exc
-            if not _is_hold(exc, source, deleting=deleting):
-                if done in {"moved", "removed", "put in place"}:
-                    raise _refused(exc, paths[0], done) from exc
-                raise
-            if not asked:
-                asked = True
-                found = holder_list(paths)
-                if any(holder.kind == "app" for holder in found):
-                    raised = FileInUse(_own_message(paths[0], done))
-                    raised.holders = tuple(found)
+    try:
+        while True:
+            try:
+                if question is None:
+                    return step()
+                # The question's part ends within a fraction of a second; a question slower than that never holds
+                # the step up: it tries anyway.
+                turn = question.turn.acquire(timeout=_TURN_WAIT_SECONDS)
+                try:
+                    return step()
+                finally:
+                    if turn:
+                        question.turn.release()
+            except OSError as exc:
+                read_only = _read_only_path(exc, paths)
+                if read_only is not None:
+                    raise _read_only_refusal(read_only, done) from exc
+                if not _is_hold(exc, source, deleting=deleting):
+                    if done in {"moved", "removed", "put in place"}:
+                        raise _refused(exc, paths[0], done) from exc
+                    raise
+                now = budget.clock()
+                if deadline is None:
+                    deadline = min(now + budget.per_file, budget.started + budget.per_step)
+                if question is None or (question.done.is_set() and not last_try and now < deadline):
+                    answered = question if question is not None and question.found() else answered
+                    question = _HolderQuestion(paths, deadline, budget.clock)
+                    # A file or two is answered within moments: the app's own hold then stops the step before it
+                    # waits at all.
+                    question.done.wait(max(0.0, min(_ANSWER_GRACE_SECONDS, deadline - now)))
+                if any(holder.kind == "app" for holder in question.found()):
+                    raised = FileInUse(_own_message(question.held_file() or paths[0], done))
+                    raised.holders = tuple(question.found())
                     raise raised from exc
-            now = budget.clock()
-            if now >= deadline:
-                found = holder_list(paths)
-                raised = FileInUse(new_step_held_message(paths[0], done, found))
+                now = budget.clock()
+                if not last_try:
+                    if now >= deadline:
+                        # Always tried once more at the deadline, after the latest answer, with the question over.
+                        last_try = True
+                        question.stop()
+                        continue
+                    delay = PAUSE_STEPS[index] if index < len(PAUSE_STEPS) else LATER_PAUSE_SECONDS
+                    index += 1
+                    sleep(max(0.0, min(delay, deadline - now)))
+                    continue
+                # The latest answer that named someone: the question still running, or the last one answered.
+                latest = question if question.found() or answered is None else answered
+                found = latest.found()
+                held = latest.held_file()
+                # The step's own file that is held is named as itself; a file inside a folder as the one held there.
+                own_file = held is not None and any(
+                    os.path.normcase(str(held)) == os.path.normcase(str(path)) for path in paths)
+                raised = FileInUse(new_step_held_message(held if own_file else paths[0], done, found, held))
                 raised.holders = tuple(found)
                 raise raised from exc
-            delay = PAUSE_STEPS[index] if index < len(PAUSE_STEPS) else LATER_PAUSE_SECONDS
-            index += 1
-            (pause or time.sleep)(max(0.0, min(delay, deadline - now)))
+    finally:
+        if question is not None:
+            # The question asks about no more files; the part it may be asking about now ends within moments, so the
+            # caller's next step does not meet a file Restart Manager still has open.
+            question.stop()
+            question.done.wait(_TURN_WAIT_SECONDS)
+
+class _HolderQuestion:
+    """Who holds a new file step's files, asked of Windows' Restart Manager in a worker thread (H4 of the Wave I-A
+    review). Restart Manager needs a few milliseconds per file, so a folder is asked about in parts with the clock
+    checked between them, and each part's holders are known as soon as it is answered: the step keeps trying while
+    Windows answers, and nothing ever waits past ``stop_at`` for it. The first files are asked about one at a time,
+    so the file that is really held can be named (M9)."""
+
+    def __init__(self, paths: list[Path], stop_at: float, clock: Callable[[], float]) -> None:
+        self._paths = list(paths)
+        self._stop_at = stop_at
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._found: list[Holder] = []
+        self._held: Path | None = None
+        self._stopped = threading.Event()
+        # Held while one part is asked about; the step takes it to try, so the two never overlap.
+        self.turn = threading.Lock()
+        self.done = threading.Event()
+        threading.Thread(target=self._ask, name="media-manglers-holder-question", daemon=True).start()
+
+    def stop(self) -> None:
+        """The step is over: ask about no more parts."""
+
+        self._stopped.set()
+
+    def found(self) -> list[Holder]:
+        with self._lock:
+            return list(self._found)
+
+    def held_file(self) -> Path | None:
+        with self._lock:
+            return self._held
+
+    def _ask(self) -> None:
+        try:
+            files = _question_files(self._paths)
+            roots = _app_roots()
+            parents: dict[int, int] | None = None
+            index = 0
+            while index < len(files) and self._clock() < self._stop_at and not self._stopped.is_set():
+                size = 1 if index < _ONE_AT_A_TIME else _FILES_PER_QUESTION_PART
+                part = files[index:index + size]
+                index += len(part)
+                with self.turn:
+                    details = _holder_details(part)
+                if not details:
+                    continue
+                parents = _parent_processes() if parents is None else parents
+                listed = _classify(details, roots, parents)
+                with self._lock:
+                    self._found += [holder for holder in listed if holder not in self._found]
+                    if self._held is None and len(part) == 1:
+                        self._held = part[0]
+        except Exception:  # noqa: BLE001 - naming the holder is a courtesy; the step's own error is raised anyway
+            pass
+        finally:
+            self.done.set()
+
+
+def _question_files(paths: list[Path]) -> list[Path]:
+    """Every file a new step's question asks about: the step's own files as given, then each folder's files, the
+    ones a virus scanner looks at longest first (programs and libraries, then the largest)."""
+
+    direct: list[Path] = []
+    inside: list[tuple[int, int, str]] = []
+    for path in paths:
+        path = Path(path)
+        try:
+            folder = path.is_dir() and not path.is_symlink()
+        except OSError:
+            continue
+        if not folder:
+            if os.path.lexists(path):
+                direct.append(path)
+            continue
+        pending = [str(path)]
+        while pending:
+            try:
+                with os.scandir(pending.pop()) as entries:
+                    for entry in entries:
+                        try:
+                            if entry.is_dir(follow_symlinks=False):
+                                pending.append(entry.path)
+                            elif entry.is_file(follow_symlinks=False):
+                                program = 0 if entry.name.casefold().endswith(_PROGRAM_SUFFIXES) else 1
+                                inside.append((program, -entry.stat(follow_symlinks=False).st_size, entry.path))
+                        except OSError:
+                            continue
+            except OSError:
+                continue
+    inside.sort()
+    return direct + [Path(item) for _program, _size, item in inside]
 
 
 def _read_only_path(exc: OSError, paths: list[Path]) -> Path | None:
     """The file Windows refused because it is marked read-only, if that is why: waiting cannot help with it.
 
-    Only the file Windows named, or the step's own target, is looked at: another read-only file elsewhere in a
-    folder says nothing about why this one was refused, and a real hold must still be waited for."""
+    Only the files Windows named (the source, and the file being replaced: M9 of the Wave I-A review), or the
+    step's own target, are looked at: another read-only file elsewhere in a folder says nothing about why this one
+    was refused, and a real hold must still be waited for."""
 
     if os.name != "nt" or getattr(exc, "winerror", None) != _ACCESS_DENIED:
         return None
-    for candidate in [exc.filename, paths[0] if paths else None]:
+    for candidate in [exc.filename, exc.filename2, paths[0] if paths else None]:
         if not candidate:
             continue
         try:
@@ -622,27 +805,33 @@ def _read_only_refusal(path: Path, done: str) -> FileStepRefused:
         f"Clear its read-only setting in its Properties, then try again. ({path})")
 
 
-def new_step_held_message(target: Path, done: str, found: list[Holder]) -> str:
-    """The plain message when a new file step is still refused at its deadline, naming who holds the file."""
+def new_step_held_message(target: Path, done: str, found: list[Holder], held: Path | None = None) -> str:
+    """The plain message when a file step is still refused at its deadline, naming the file and who holds it
+    (``held``: the file inside a folder that is really held, when Windows said which).
+
+    It never tells the user to close, stop, exclude or turn off the holder (H3 of the Wave I-A review): Windows
+    reports some virus scanners as ordinary programs, so a program, a service or an unnamed holder all get the same
+    words, to wait a moment and try again. Only Media Manglers itself, still running, is asked to be closed."""
 
     target = Path(target)
+    it = "it" if held is None or os.path.normcase(str(held)) == os.path.normcase(str(target)) else Path(held).name
     lost = "Nothing was lost."
     workbench = [holder for holder in found if holder.kind == "workbench"]
     if workbench:
-        return (f"{target.name} could not be {done} because Media Manglers is still running and has it open "
+        return (f"{target.name} could not be {done} because Media Manglers is still running and has {it} open "
                 f"({', '.join(holder.describe() for holder in workbench)}). {lost} Close Media Manglers, then try "
                 f"again. ({target})")
-    services = [holder for holder in found if holder.kind == "service"]
-    programs = [holder for holder in found if holder.kind == "program"]
-    if programs:
-        names = ", ".join(holder.describe() for holder in programs + services)
-        return (f"{target.name} could not be {done} because {names} has it open. {lost} Close that program, or "
-                f"wait a moment, then try again. ({target})")
-    if services:
-        names = ", ".join(holder.describe() for holder in services)
-        return (f"{target.name} could not be {done} because {names} has it open. {lost} Wait a moment, then try "
+    others = [holder for holder in found if holder.kind == "program"] + [
+        holder for holder in found if holder.kind == "service"]
+    if others:
+        names = ", ".join(holder.describe() for holder in others)
+        return (f"{target.name} could not be {done} because {names} has {it} open. {lost} Wait a moment, then try "
                 f"again. ({target})")
-    return (f"{target.name} could not be {done}: another program has it open, and Windows did not say which. "
+    own = [holder for holder in found if holder.kind == "app"]
+    if own:
+        return (f"{target.name} could not be {done} because Media Manglers itself still had {it} open "
+                f"({', '.join(holder.describe() for holder in own)}). {lost} Try again in a moment. ({target})")
+    return (f"{target.name} could not be {done}: another program has {it} open, and Windows did not say which. "
             f"{lost} Wait a moment, then try again. ({target})")
 
 
@@ -661,21 +850,23 @@ def _own_message(target: Path, done: str) -> str:
 
 
 def _held_message(target: Path, done: str, paths: list[Path]) -> str:
-    names = holders(paths)
-    if names:
-        return (f"{target.name} could not be {done} because {', '.join(names)} has it open. Nothing was lost. "
-                f"Close that program or wait a moment, then try again. ({target})")
+    """An older step's message at its deadline: the same words as a new step's (H3 of the Wave I-A review)."""
+
+    found = holder_list(paths)
+    if found:
+        return new_step_held_message(target, done, found)
     # Windows names no program: the file may be read-only, not allowed, or held by something it cannot see.
     return (f"{target.name} could not be {done}: Windows did not say which program has it open. Nothing was "
-            f"lost. Close any program that may be using it, or wait a moment, then try again; if none is, check "
-            f"that it is not read-only. ({target})")
+            f"lost. Wait a moment, then try again; if it still cannot be {done}, check that it is not marked "
+            f"read-only. ({target})")
 
 
 def _holder_paths(path: Path, budget: StepBudget | None = None) -> list[Path]:
     """The paths Windows is asked about for ``path``: a folder's holder is found through the files inside. An older
-    step asks about the first 512; a new file step (``budget``) about every one."""
+    step asks about the first 512, listed now; a new file step (``budget``) about every one, listed by its question
+    beside the step (``_HolderQuestion``), so a large folder never delays the step itself."""
 
-    if not path.is_dir():
+    if budget is not None or not path.is_dir():
         return [path]
     found = [path]
     for current, _folders, files in os.walk(path):
@@ -740,8 +931,13 @@ def holder_list(paths: list[Path]) -> list[Holder]:
     found = _holder_details(paths)
     if not found:
         return []
-    roots = _app_roots()
-    parents = _parent_processes()
+    return _classify(found, _app_roots(), _parent_processes())
+
+
+def _classify(found: list[tuple[int, int, str, str, int]], roots: dict[int, int | None],
+              parents: dict[int, int]) -> list[Holder]:
+    """Each holder Restart Manager reported, with its kind."""
+
     listed: list[Holder] = []
     for pid, started, name, service, app_type in found:
         if _is_app(pid, started, roots, parents):
@@ -858,6 +1054,55 @@ def mark_app_process() -> None:
 
     started = _process_start_time(os.getpid())
     os.environ[APP_PROCESS_VARIABLE] = f"{os.getpid()}:{started or 0}"
+
+
+def starting_app_alive() -> bool:
+    """Whether the Workbench that started this process (``mark_app_process``) is still running: its process number
+    is there and started when it says (M15 of the Wave I-A review: a paused run whose Workbench is gone ends itself).
+    True for a process no Workbench started."""
+
+    pid_text, _sep, start_text = os.environ.get(APP_PROCESS_VARIABLE, "").partition(":")
+    try:
+        pid, started = int(pid_text), int(start_text)
+    except ValueError:
+        return True
+    if pid <= 0 or pid == os.getpid():
+        return True
+    # An ended process can still be opened while another program holds a handle to it, so it must still be running.
+    found = _process_start_time(pid)
+    if found is None or not _process_running(pid):
+        return False
+    return started <= 0 or found == started
+
+
+def _process_running(pid: int) -> bool:
+    """Whether process ``pid`` has not ended yet (Windows' STILL_ACTIVE)."""
+
+    if os.name != "nt":
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+    try:
+        import ctypes  # noqa: PLC0415
+        from ctypes import wintypes  # noqa: PLC0415
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        try:
+            code = wintypes.DWORD()
+            return bool(kernel32.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == 259
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception:  # noqa: BLE001 - when Windows cannot say, the run is not ended
+        return True
 
 
 def _app_roots() -> dict[int, int | None]:

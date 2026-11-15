@@ -1082,23 +1082,27 @@ class WordTimingsTests(unittest.TestCase):
 
         model = mock.Mock()
         model.transcribe.return_value = {"segments": [dict(item) for item in self.SEGMENTS]}
+        # H2 of the Wave I-A review: Whisper is handed the sound the app read from the WAV, never the file name.
+        self.sound = object()
         with mock.patch.object(whisper_local, "load_whisper_model", return_value=model) as load, \
-                mock.patch.object(whisper_local, "pick_whisper_device", return_value=device):
+                mock.patch.object(whisper_local, "pick_whisper_device", return_value=device), \
+                mock.patch.object(whisper_local, "whisper_audio", return_value=self.sound) as reads:
             transcribe = voice_track.whisper_transcriber("small", device == "cuda", "en", **options)
             segments = transcribe(Path("probe.wav"))
         load.assert_called_once_with("small", device)
+        reads.assert_called_once_with(Path("probe.wav"), "")
         return model, segments
 
     def test_without_word_timings_whisper_is_asked_exactly_as_before(self) -> None:
         model, _segments = self._transcribe("cpu")
-        model.transcribe.assert_called_once_with("probe.wav", language="en", task="transcribe", verbose=None,
+        model.transcribe.assert_called_once_with(self.sound, language="en", task="transcribe", verbose=None,
                                                  fp16=False, condition_on_previous_text=False, temperature=0.0)
         model, _segments = self._transcribe("cuda")
         self.assertIs(model.transcribe.call_args.kwargs["fp16"], True)
 
     def test_word_timings_are_asked_for_and_kept(self) -> None:
         model, segments = self._transcribe("cuda", word_timestamps=True)
-        model.transcribe.assert_called_once_with("probe.wav", language="en", task="transcribe", verbose=None,
+        model.transcribe.assert_called_once_with(self.sound, language="en", task="transcribe", verbose=None,
                                                  fp16=True, condition_on_previous_text=False, temperature=0.0,
                                                  word_timestamps=True)
         self.assertEqual(segments[0]["words"], self.SEGMENTS[0]["words"])

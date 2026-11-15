@@ -55,6 +55,8 @@ STATE_WAITING_FOR_RUN = "The sound is measured once the run has finished."
 STATE_STILL_RECORDING = "This recording is still being written; its sound is measured once it is finished."
 STATE_FAILED = "The sound of this recording could not be measured."
 STATE_NO_AUDIO = "This recording has no sound to show."
+# Installer plan, Stage 3: a background job never asks for a Whisper model; it skips the listening with this note.
+STATE_MODEL_NOT_APPROVED = "No Next speech yet: it needs {model}. Approve its download in Settings > Dependencies."
 
 # A thread object destroyed while it still runs ends the whole process, so one that shutdown gave up
 # waiting for is kept here until it ends.
@@ -78,6 +80,10 @@ def _time_left(seconds: float) -> str:
         return "less than a minute left"
     minutes = round(seconds / 60)
     return "about 1 minute left" if minutes == 1 else f"about {minutes} minutes left"
+
+
+def _model_words(model: str) -> str:
+    return f"the Whisper model {model}" if model else "a Whisper model"
 
 
 class _LookupThread(QThread):
@@ -174,6 +180,12 @@ class LevelsService(QObject):
         self._facts_request = facts_request or (lambda: {})
         self._facts: dict[str, Any] = {}
         self._facts_tried: set[str] = set()  # read once this session, whatever came of it: never read in a loop
+        # Installer plan, Stage 3: recordings whose listening was skipped because the Whisper model it needs is not
+        # approved, and that model. Not read again until a model is approved (``model_approved``), then listened to.
+        self._skipped: dict[str, str] = {}
+        self._approvals = 0  # models approved this session
+        self._build_skip: str | None = None  # the model the build going now skipped its listening for
+        self._build_approvals = 0  # models approved when the build going now started
         self._log = log or (lambda _text: None)
         self._paths: dict[str, Path] = {}
         self._levels: dict[str, Levels] = {}
@@ -243,8 +255,8 @@ class LevelsService(QObject):
         just used reaches this queue, never the whole library)."""
 
         facts = self._facts.get(key)
-        return (self._facts_lookup is not None and key not in self._facts_tried and facts is not None
-                and bool(facts.needs_read or facts.needs_listen))
+        return (self._facts_lookup is not None and key not in self._facts_tried and key not in self._skipped
+                and facts is not None and bool(facts.needs_read or facts.needs_listen))
 
     def want(self, path: Path | str) -> None:
         """The player opened this recording: find its levels, and measure them first if they are missing."""
@@ -284,6 +296,21 @@ class LevelsService(QObject):
             self._stop_build(requeue=True)
             return
         self._enqueue(key, first=True)
+
+    def model_approved(self) -> None:
+        """A Whisper model the operator approved has downloaded: every recording whose listening for Next speech
+        was skipped for want of one is listened to again, in the background (installer plan, Stage 3)."""
+
+        self._approvals += 1
+        if not self.enabled:
+            return
+        skipped, self._skipped = list(self._skipped), {}
+        for key in skipped:
+            self._say(key, "")
+            if key not in self._looking and key != self._building:
+                # Its speech facts are asked again first: they say whether it still has to be listened to.
+                self._looked_up.discard(key)
+            self._enqueue(key, first=key == self._wanted)
 
     def queue(self, paths: Iterable[Path | str], listener: Any = None) -> None:
         """A finished run's recordings, measured after anything the player wants. ``listener`` (if any)
@@ -463,6 +490,7 @@ class LevelsService(QObject):
         # Asked once: a fresh measure that is stopped carries on later from its own checkpoint.
         self._fresh.discard(key)
         self._progress_from = None
+        self._build_skip, self._build_approvals = None, self._approvals
         command = cli_command(resources, "track-levels", request, result)
         self._building, self._build_folder = key, folder
         self._build = _BuildThread(command, str(getattr(resources, "app_root", "") or os.getcwd()), self._factory())
@@ -479,6 +507,15 @@ class LevelsService(QObject):
         try:
             event = json.loads(text[len(track_levels.PROGRESS_PREFIX):])
         except ValueError:
+            return
+        if isinstance(event, dict) and "listening_skipped" in event:
+            # Installer plan, Stage 3: the helper never asks for a model and never downloads one; it skipped the
+            # listening with this note. The lanes say why when the build ends (``_finish``).
+            model = str(event.get("model") or "")
+            self._build_skip = model
+            self._log(f"Waveforms: {self._paths[key].name} was not listened to for Next speech, because "
+                      f"{_model_words(model)} is not approved yet. Approve its download in Settings > Dependencies; "
+                      "it is listened to again once the model has downloaded.")
             return
         if isinstance(event, dict) and "reading_for_speech" in event:
             # A read for the speech facts of a recording whose lanes are whole already: they stay as they are.
@@ -548,8 +585,14 @@ class LevelsService(QObject):
             if levels is not None:
                 levels.complete = True
             self._done[key] = status
-            self._facts_tried.add(key)
-            self._say(key, "")
+            # A model approved while this build ran: it is neither tried nor skipped, so it is listened to now.
+            if self._approvals == self._build_approvals:
+                if self._build_skip is not None:
+                    self._skipped[key] = self._build_skip
+                elif key not in self._skipped:
+                    self._facts_tried.add(key)
+            skipped = self._skipped.get(key)
+            self._say(key, "" if skipped is None else STATE_MODEL_NOT_APPROVED.format(model=_model_words(skipped)))
             self._log(f"Waveforms: {self._paths[key].name} is ready.")
             # The cache holds the whole result; the lines may have been read part way.
             self._looked_up.discard(key)

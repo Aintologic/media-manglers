@@ -1243,11 +1243,13 @@ Transcriber = Callable[[Path], list[dict[str, Any]]]
 
 
 def whisper_transcriber(model_name: str, prefer_gpu: bool, language_code: str, *,
-                        word_timestamps: bool = False) -> Transcriber:
+                        word_timestamps: bool = False, ffmpeg_exe: str = "") -> Transcriber:
     # 214: the model is loaded where every other Whisper model is, in the shared helper.
     # 226: ``word_timestamps`` asks Whisper for each word's time too, and each segment keeps its
     # "words" (the AI Video Editor's cut points). The decode settings are the same either way.
-    from media_manglers.providers.whisper_local import load_whisper_model, pick_whisper_device
+    # H2 of the Wave I-A review: Whisper is handed the sound the app read from its own WAV, never a file name, so it
+    # never starts an FFmpeg from PATH; ``ffmpeg_exe`` reads any other sound.
+    from media_manglers.providers.whisper_local import load_whisper_model, pick_whisper_device, whisper_audio
 
     device = pick_whisper_device(prefer_gpu)
     model = load_whisper_model(model_name, device)
@@ -1255,7 +1257,7 @@ def whisper_transcriber(model_name: str, prefer_gpu: bool, language_code: str, *
     def transcribe(path: Path) -> list[dict[str, Any]]:
         options: dict[str, Any] = {"word_timestamps": True} if word_timestamps else {}
         result = model.transcribe(
-            str(path),
+            whisper_audio(path, ffmpeg_exe),
             language=language_code or None,
             task="transcribe",
             verbose=None,

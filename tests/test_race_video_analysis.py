@@ -36,7 +36,18 @@ from media_manglers.core.race_video.review import (  # noqa: E402
     word_cut_by,
 )
 from media_manglers.core.race_video.timeline import SCHEMA  # noqa: E402
-from tests.whisper_test_models import checked_whisper  # noqa: E402
+from tests.whisper_test_models import checked_whisper, whisper_gets_file_names  # noqa: E402
+
+# H2 of the Wave I-A review: these Whisper stand-ins answer by the file they are given; see whisper_gets_file_names.
+_FILE_NAMES = whisper_gets_file_names()
+
+
+def setUpModule() -> None:  # noqa: N802 - unittest's name
+    _FILE_NAMES.start()
+
+
+def tearDownModule() -> None:  # noqa: N802 - unittest's name
+    _FILE_NAMES.stop()
 
 FFMPEG = shutil.which("ffmpeg")
 FFPROBE = shutil.which("ffprobe")

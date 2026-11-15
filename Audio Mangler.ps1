@@ -43,6 +43,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# M14 of the Wave I-A review: no Python this script starts writes compiled bytecode into a Python on the PC or into
+# Media Manglers' own folder (this process only).
+$env:PYTHONDONTWRITEBYTECODE = "1"
 $script:CurrentLogFile = $null
 $script:AppName = "Audio Mangler"
 $script:FallbackAppVersion = "0.9.0"
@@ -1074,8 +1077,15 @@ function Invoke-PhaseAction {
 
 # 188: where each tool comes from, and its own install folders. The Workbench has the same
 # table (src\media_manglers_workbench\tool_sources.py); tests\test_tool_sources.py keeps them equal.
-# Every tool is looked for in the same order: the path given, then Media Manglers' own copy (Bundled,
-# below the runtime folder beside this script; installer plan Stage 1), then PATH, then these folders.
+# FFmpeg and FFprobe are looked for in this order: the path given (FFprobe: beside the FFmpeg in use),
+# then Media Manglers' own copy (Bundled, below the runtime folder beside this script; installer plan
+# Stage 1), then PATH, then these folders. yt-dlp has no own copy: the path given, then PATH, then these
+# folders, then Python's Scripts folders and "python -m yt_dlp".
+# Python is different: this script never uses Media Manglers' own Python, although the table lists it.
+# Resolve-PythonInterpreterPath takes -PythonExe when given; otherwise python on PATH, then py -3, then
+# these folders. Without -PythonExe, a run that needs Local Whisper (and -WhisperHealthCheck) then lets
+# Select-PreferredWhisperPythonInterpreter switch to whichever of that Python, python on PATH, py -3 and
+# every python where.exe finds best reports Whisper, PyTorch and CUDA (on a tie, the first).
 # Nothing here downloads or installs anything.
 function Get-ToolSource {
     param([Parameter(Mandatory)] [string]$Key)
@@ -4345,329 +4355,14 @@ function Invoke-PythonWhisperTranscriptProcess {
         else {
             "Tracked Python CLI helper failed before returning a result."
         }
-        Write-Log ("Tracked Python Whisper helper failed. Falling back to the legacy inline helper. {0}" -f $cliError) "WARN"
+        # The shared helper is the only way Whisper runs, as in Video Mangler. It loads a model only when the
+        # file is on this PC as Whisper published it; otherwise it refuses and says to approve the download in
+        # Settings > Dependencies. The legacy inline script that used to stand in here called Whisper's own
+        # loader, which downloaded a missing model, or replaced a damaged one, without that approval.
+        throw ("The Whisper helper failed: {0}" -f $cliError)
     }
 
-    $ffmpegDir = Split-Path $FFmpegExe -Parent
-    $tempPy = Join-Path ([System.IO.Path]::GetTempPath()) ("whisper_transcribe_" + [guid]::NewGuid().ToString() + ".py")
-
-$pyCode = @'
-print("[PY] Python process started", flush=True)
-
-import json
-import os
-import sys
-import traceback
-import time
-import threading
-from datetime import datetime, timezone
-
-for stream_name in ("stdout", "stderr"):
-    stream = getattr(sys, stream_name, None)
-    reconfigure = getattr(stream, "reconfigure", None)
-    if callable(reconfigure):
-        try:
-            reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
-
-audio_path = sys.argv[1]
-output_dir = sys.argv[2]
-model_name = sys.argv[3]
-language_code = sys.argv[4]
-initial_prompt = sys.argv[5]
-ffmpeg_dir = sys.argv[6]
-prefer_gpu = sys.argv[7].lower() == "true"
-task_name = sys.argv[8]
-json_name = sys.argv[9]
-srt_name = sys.argv[10]
-text_name = sys.argv[11]
-progress_file = sys.argv[12]
-
-os.makedirs(output_dir, exist_ok=True)
-
-if ffmpeg_dir:
-    os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
-
-def log(msg):
-    print(msg, flush=True)
-
-started_at = time.time()
-progress_state = {
-    "stage": "starting",
-    "message": "Preparing Whisper helper",
-    "device": "pending",
-    "selected_device": "pending",
-    "requested_device": "cuda" if prefer_gpu else "cpu",
-    "device_event": "starting",
-    "device_switch_count": 0,
-    "gpu_error": "",
-}
-
-def write_progress(stage=None, message=None, device=None, extra=None):
-    if stage is not None:
-        progress_state["stage"] = stage
-    if message is not None:
-        progress_state["message"] = message
-    if device:
-        progress_state["device"] = device
-        progress_state["selected_device"] = device
-    if extra:
-        progress_state.update(extra)
-
-    if not progress_file:
-        return
-
-    payload = {
-        "stage": progress_state["stage"],
-        "message": progress_state["message"],
-        "elapsed_seconds": round(max(0.0, time.time() - started_at), 1),
-        "updated_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "device": progress_state["device"],
-        "selected_device": progress_state["selected_device"],
-        "requested_device": progress_state["requested_device"],
-        "device_event": progress_state["device_event"],
-        "device_switch_count": progress_state["device_switch_count"],
-        "gpu_error": progress_state["gpu_error"],
-        "model_name": model_name,
-        "task_name": task_name,
-    }
-    temp_path = progress_file + ".tmp"
-    try:
-        with open(temp_path, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
-        os.replace(temp_path, progress_file)
-    except Exception:
-        try:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-        except OSError:
-            pass
-
-heartbeat_stop = False
-
-def heartbeat():
-    while not heartbeat_stop:
-        elapsed = time.time() - started_at
-        log(f"[PY] heartbeat: transcription process alive, elapsed={elapsed:.0f}s, stage={progress_state['stage']}")
-        write_progress()
-        time.sleep(15)
-
-hb = threading.Thread(target=heartbeat, daemon=True)
-hb.start()
-
-write_progress("starting", "Preparing Whisper transcription helper")
-
-try:
-    write_progress("importing_whisper", "Importing Whisper runtime")
-    import whisper
-except Exception:
-    traceback.print_exc(file=sys.stderr)
-    sys.exit(10)
-
-torch = None
-if prefer_gpu:
-    try:
-        import torch
-    except Exception as ex:
-        log(f"[PY] Torch import failed. GPU path disabled. {ex}")
-        torch = None
-
-def fmt_srt_time(seconds):
-    total_ms = int(round(float(seconds) * 1000))
-    hours = total_ms // 3600000
-    total_ms %= 3600000
-    minutes = total_ms // 60000
-    total_ms %= 60000
-    seconds_part = total_ms // 1000
-    millis = total_ms % 1000
-    return f"{hours:02}:{minutes:02}:{seconds_part:02},{millis:03}"
-
-def run_transcription(device_name):
-    fp16 = device_name == "cuda"
-    write_progress(
-        "loading_model",
-        f"Loading Whisper model '{model_name}' on {device_name}",
-        device_name,
-        {"requested_device": progress_state["requested_device"]},
-    )
-    log(f"[PY] Loading model '{model_name}' on device '{device_name}'...")
-    model = whisper.load_model(model_name, device=device_name)
-    write_progress(
-        "transcribing",
-        f"Running Whisper {task_name} on {device_name}",
-        device_name,
-        {"requested_device": progress_state["requested_device"]},
-    )
-    log(f"[PY] Starting {task_name} on {device_name}...")
-    result = model.transcribe(
-        audio_path,
-        language=language_code if language_code else None,
-        initial_prompt=initial_prompt if initial_prompt else None,
-        task=task_name,
-        verbose=False,
-        fp16=fp16
-    )
-    return result, fp16
-
-device = "cpu"
-fp16 = False
-gpu_error = ""
-result = None
-
-try:
-    log(f"[PY] Audio input: {audio_path}")
-    log(f"[PY] Output dir: {output_dir}")
-    log(f"[PY] Python executable: {sys.executable}")
-    log(f"[PY] Python version: {sys.version.split()[0]}")
-
-    if prefer_gpu and torch is not None and torch.cuda.is_available():
-        try:
-            log(f"[PY] Torch version: {getattr(torch, '__version__', '') or 'unavailable'}")
-            log(f"[PY] Torch CUDA version: {getattr(torch.version, 'cuda', '') or 'unavailable'}")
-            log(f"[PY] CUDA available: {bool(torch.cuda.is_available())}")
-            log(f"[PY] CUDA device count: {int(torch.cuda.device_count())}")
-            if int(torch.cuda.device_count()) > 0:
-                log(f"[PY] CUDA device[0]: {torch.cuda.get_device_name(0)}")
-        except Exception:
-            pass
-        log("[PY] Requested device: cuda")
-        try:
-            device = "cuda"
-            result, fp16 = run_transcription("cuda")
-        except Exception as ex:
-            gpu_error = str(ex)
-            log(f"[PY] GPU transcription failed. Retrying on CPU. {ex}")
-            write_progress(
-                "fallback_to_cpu",
-                f"GPU failed. Retrying on CPU. {gpu_error}",
-                "cpu",
-                {
-                    "selected_device": "cpu",
-                    "device_event": "gpu_to_cpu_fallback",
-                    "device_switch_count": 1,
-                    "gpu_error": gpu_error,
-                },
-            )
-            traceback.print_exc(file=sys.stderr)
-            device = "cpu"
-    else:
-        log("[PY] Requested device: cpu")
-
-    if result is None:
-        result, fp16 = run_transcription("cpu")
-        device = "cpu"
-
-    write_progress("writing_outputs", "Writing transcript files", device)
-    log("[PY] Writing transcript files...")
-
-    srt_path = os.path.join(output_dir, srt_name)
-    json_path = os.path.join(output_dir, json_name)
-    text_path = os.path.join(output_dir, text_name)
-
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False, indent=2)
-
-    with open(text_path, "w", encoding="utf-8") as f:
-        segments = result.get("segments") or []
-        for seg in segments:
-            text = (seg.get("text") or "").strip()
-            if text:
-                f.write(text + "\n")
-
-    with open(srt_path, "w", encoding="utf-8") as f:
-        segments = result.get("segments") or []
-        for index, seg in enumerate(segments, start=1):
-            start_ts = fmt_srt_time(seg.get("start", 0))
-            end_ts = fmt_srt_time(seg.get("end", 0))
-            text = (seg.get("text") or "").strip()
-            f.write(f"{index}\n{start_ts} --> {end_ts}\n{text}\n\n")
-
-    log("[PY] Transcript files written successfully.")
-    write_progress("complete", "Transcript files written successfully", device)
-
-    print(json.dumps({
-        "device": device,
-        "fp16": fp16,
-        "json_path": json_path,
-        "srt_path": srt_path,
-        "text_path": text_path,
-        "language": result.get("language", ""),
-        "segments_count": len(result.get("segments") or []),
-        "gpu_error": gpu_error,
-        "requested_device": progress_state["requested_device"],
-        "selected_device": progress_state["selected_device"],
-        "device_switch_count": progress_state["device_switch_count"]
-    }), flush=True)
-
-except Exception:
-    traceback.print_exc(file=sys.stderr)
-    sys.exit(20)
-
-finally:
-    heartbeat_stop = True
-'@
-
-    Set-Content -Path $tempPy -Value $pyCode -Encoding UTF8
-
-    try {
-        $result = Invoke-ExternalStreaming `
-            -FilePath $PythonCommand `
-            -Arguments @(
-                $tempPy,
-                $AudioPath,
-                $TranscriptFolder,
-                $ModelName,
-                $LanguageCode,
-                $InitialPrompt,
-                $ffmpegDir,
-                $PreferGpu.ToString(),
-                $Task,
-                $JsonName,
-                $SrtName,
-                $TextName,
-                $ProgressStateFilePath
-            ) `
-            -StepName $StepName `
-            -IgnoreExitCode `
-            -HeartbeatSeconds $HeartbeatSeconds `
-            -TimeoutSeconds $TimeoutSeconds `
-            -StallTimeoutSeconds $StallTimeoutSeconds `
-            -EstimatedTotalSeconds $EstimatedTotalSeconds `
-            -ProgressStateFilePath $ProgressStateFilePath `
-            -CpuFallbackRuntimePlan $CpuFallbackRuntimePlan
-
-        if ($result.ExitCode -ne 0) {
-            throw "Python Whisper transcription failed. See script_run.log for the exact Python error."
-        }
-
-        $parsedJsonLine = ($result.StdOut -split "`r?`n" | Where-Object { $_.Trim().StartsWith("{") -and $_.Trim().EndsWith("}") } | Select-Object -Last 1)
-
-        if (-not $parsedJsonLine) {
-            throw "Python Whisper transcription did not return a parsable result. See script_run.log."
-        }
-
-        $parsed = $parsedJsonLine | ConvertFrom-Json
-
-        return [PSCustomObject]@{
-            Device        = [string]$parsed.device
-            Fp16          = [bool]$parsed.fp16
-            JsonPath      = [string]$parsed.json_path
-            SrtPath       = [string]$parsed.srt_path
-            TextPath      = [string]$parsed.text_path
-            Language      = [string]$parsed.language
-            SegmentsCount = [int]$parsed.segments_count
-            GpuError      = [string]$parsed.gpu_error
-            RequestedDevice = [string]$parsed.requested_device
-            SelectedDevice = [string]$parsed.selected_device
-            DeviceSwitchCount = [int]$parsed.device_switch_count
-        }
-    }
-    finally {
-        if (Test-Path $tempPy) {
-            Remove-Item $tempPy -Force -ErrorAction SilentlyContinue
-        }
-    }
+    throw (Get-MediaManglersPythonCliUnavailableMessage -FeatureLabel "Whisper transcription")
 }
 
 function Invoke-LocalWhisperCalibration {

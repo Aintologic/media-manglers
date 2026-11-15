@@ -167,7 +167,9 @@ class TheOneCheckTests(ModelCase):
 
 
 class EveryFeaturePathTests(ModelCase):
-    """Each feature's own path to Whisper, with a valid, a damaged and a missing model."""
+    """The shared loader as each feature's path reaches it, with a valid, a damaged and a missing model. Which models
+    each feature checks before it starts, and in what order it works, are tested in
+    ``tests/test_model_rows_and_downloads.py`` and the Prepare and raw bin tests (M5 of the Wave I-A review)."""
 
     def _cases(self):
         return (("valid", {}), ("damaged", {"damaged": ("base.en", "medium", "small")}),
@@ -266,6 +268,8 @@ class EveryFeaturePathTests(ModelCase):
                                  detail="Not on this PC yet.")]
         fake = types.SimpleNamespace(runner_thread=None, resources=types.SimpleNamespace(dependencies=rows))
         fake.model_blockers = lambda models: WorkbenchWindow.model_blockers(fake, models)
+        fake.app_settings = {}
+        fake.run_models = lambda kind, settings: WorkbenchWindow.run_models(fake, kind, settings)
         fake.speech_blockers = lambda: []  # speech recognition is set up (Stage 4 has its own test)
         from media_manglers_workbench import app as app_module
         with mock.patch.object(app_module, "warn") as warned:

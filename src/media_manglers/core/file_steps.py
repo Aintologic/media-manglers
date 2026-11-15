@@ -27,15 +27,25 @@ STEP_KINDS = ("remove", "remove_tree", "move", "rename_into_place", "place_check
 
 def remove_addons(*, budget: safe_write.StepBudget | None = None,
                   pause: Callable[[float], None] | None = None) -> dict[str, Any]:
-    """Remove every downloaded add-on set, as the uninstaller does. Data, recordings and models are not here."""
+    """Remove every downloaded add-on set, as the uninstaller does. Data, recordings and models are not here.
+
+    A removal cut short leaves the add-ons under a trash name beside their folder; every run removes those too, in
+    the same step, and stops naming what is still there, so it never reports success while add-ons are left (M10 of
+    the Wave I-A review)."""
 
     root = addons_root()
-    if not os.path.lexists(root):
-        return {"removed": False, "path": str(root),
-                "message": "There were no downloaded add-ons to remove."}
-    safe_write.remove_disposable_tree(root, within=root.parent, budget=budget or safe_write.StepBudget(),
-                                      pause=pause)
-    return {"removed": True, "path": str(root), "message": f"Removed the downloaded add-ons ({root})."}
+    budget = budget or safe_write.StepBudget()
+    there = os.path.lexists(root)
+    if there:
+        safe_write.remove_disposable_tree(root, within=root.parent, budget=budget, pause=pause)
+    left = safe_write.remove_trash_beside(root, within=root.parent, budget=budget, pause=pause)
+    if there:
+        return {"removed": True, "path": str(root), "message": f"Removed the downloaded add-ons ({root})."}
+    if left:
+        return {"removed": True, "path": str(root),
+                "message": f"Removed what an earlier removal of the downloaded add-ons left ({len(left)} folder"
+                           f"{'' if len(left) == 1 else 's'} beside {root})."}
+    return {"removed": False, "path": str(root), "message": "There were no downloaded add-ons to remove."}
 
 
 def run_step(step: dict[str, Any], *, budget: safe_write.StepBudget | None = None,

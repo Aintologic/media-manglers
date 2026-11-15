@@ -30,8 +30,20 @@ from media_manglers.core.race_video import analysis, game_speech, project as pro
 from media_manglers.core.race_video import requests as race_requests  # noqa: E402
 from media_manglers.core.race_video.timeline import DEFAULT_LAYOUT, SCHEMA  # noqa: E402
 from media_manglers.core.spelling_words import SETTING_KEY as WORDS_KEY  # noqa: E402
+from media_manglers.core.whisper_models import MISSING, ModelNotApproved  # noqa: E402
 from media_manglers.providers import whisper_local  # noqa: E402
-from tests.whisper_test_models import checked_whisper  # noqa: E402
+from tests.whisper_test_models import checked_whisper, install_models, whisper_gets_file_names  # noqa: E402
+
+# H2 of the Wave I-A review: these Whisper stand-ins answer by the file they are given; see whisper_gets_file_names.
+_FILE_NAMES = whisper_gets_file_names()
+
+
+def setUpModule() -> None:  # noqa: N802 - unittest's name
+    _FILE_NAMES.start()
+
+
+def tearDownModule() -> None:  # noqa: N802 - unittest's name
+    _FILE_NAMES.stop()
 
 FFMPEG = shutil.which("ffmpeg")
 FFPROBE = shutil.which("ffprobe")
@@ -876,6 +888,128 @@ class WhisperProgressTests(PrepareTestCase):
         self.assertEqual([line["phase_index"] for line in lines if line["phase"] == "Writing down the narration"][0], 3)
         self.assertEqual(lines[-1]["activity"], "Ready for the AI editor")
         self.assertTrue(lines[-1]["source_terminal"])
+
+
+class ModelsCheckedFirstTests(PrepareTestCase):
+    """Installer plan, Stage 3 (review M4): every Whisper model a Prepare will load is checked before it reads the
+    recording, so a model not approved stops it at once with what to do, not after the read and the narration (tens
+    of minutes on a processor). A refused first Prepare leaves no project, and a model the run does not load is not
+    asked for. Whisper is stood in for with a model table and this test's own model cache; the shared Whisper helper,
+    the cross-track check and the quick passes are the real ones."""
+
+    NAMED_TWO = [("narration", "T1 - Narration"), ("game", "T2 - Game")]
+    EVERY_MODEL = ("medium", "small", "base.en")
+
+    def setUp(self) -> None:
+        super().setUp()
+        cache = mock.patch.dict(os.environ, {"XDG_CACHE_HOME": str(self.root / "xdg-cache")})
+        cache.start()
+        self.addCleanup(cache.stop)
+
+    def run_prepare(self, source: Path, *, missing: tuple[str, ...] = (), **extra) -> tuple[object, list, list, list]:
+        """Prepare with the main model medium, the quick passes' small and the cross-track check's base.en, each on
+        this PC unless ``missing``. Returns its result (or the ModelNotApproved it stopped with), the steps it started
+        (the read that confirms which recording it is, the read, the narration's Whisper run, each Whisper model it
+        set up), the models Whisper was asked to load, and the FFmpeg runs that read the recording."""
+
+        steps: list[str] = []
+        loads: list[str] = []
+
+        def noted(step, real):
+            def run(*args, **kwargs):
+                steps.append(step(*args, **kwargs) if callable(step) else step)
+                return real(*args, **kwargs)
+            return run
+
+        class _Whisper:
+            _MODELS = install_models(missing=missing)
+
+            @staticmethod
+            def load_model(name, device=None, download_root=None, **_options):
+                loads.append(name)
+                return _Model()
+
+        FakeWhisper.heard = []
+        with mock.patch.dict(sys.modules, {"whisper": _Whisper(), "torch": _CpuTorch()}), FFmpegReads() as runs, \
+                mock.patch.object(race_requests, "recording_block",
+                                  side_effect=noted("confirming read", race_requests.recording_block)), \
+                mock.patch.object(race_requests, "read_recording",
+                                  side_effect=noted("read", race_requests.read_recording)), \
+                mock.patch.object(whisper_local, "transcribe_from_request",
+                                  side_effect=noted("narration", whisper_local.transcribe_from_request)), \
+                mock.patch.object(voice_track, "whisper_transcriber",
+                                  side_effect=noted(lambda model, *_rest, **_options: f"Whisper {model}",
+                                                    voice_track.whisper_transcriber)):
+            try:
+                result: object = self.prepare(source, **{"skip_transcript": False, "whisper_model": "medium", **extra})
+            except ModelNotApproved as exc:
+                result = exc
+        return result, steps, loads, runs.of(source)
+
+    def assert_stopped_before_anything(self, outcome: tuple, model: str) -> None:
+        result, steps, loads, reads = outcome
+        self.assertIsInstance(result, ModelNotApproved, result)
+        self.assertEqual((result.model, result.state), (model, MISSING))
+        self.assertIn("Approve its download in Settings > Dependencies", str(result))
+        self.assertEqual(steps, [], "nothing started: no read of the recording, no transcription, no Whisper model")
+        self.assertEqual(loads, [], "Whisper was never asked for a model")
+        self.assertEqual(reads, [], "FFmpeg never read the recording")
+        self.assertFalse((self.root / "out" / "race-videos").exists(), "a refused first Prepare leaves no project")
+
+    def test_base_en_missing_stops_prepare_before_it_reads_anything(self) -> None:
+        # base.en is the cross-track check's: it was found only once the whole narration had been written down.
+        source = editor_recording(self.root / "race.mkv", self.NAMED_TWO, seconds=8)
+        self.assert_stopped_before_anything(self.run_prepare(source, missing=("base.en",)), "base.en")
+
+    def test_the_quick_model_missing_stops_prepare_before_it_reads_anything(self) -> None:
+        # The quick passes' model hears the other voices on the game track, after the narration...
+        named = editor_recording(self.root / "race.mkv", self.NAMED_TWO, seconds=8)
+        self.assert_stopped_before_anything(self.run_prepare(named, missing=("small",)), "small")
+        # ...and finds the voice by listening, after the read, when the names and the settings do not say.
+        plain = editor_recording(self.root / "plain.mkv", [("game", ""), ("narration", ""), ("silent", "")], seconds=8)
+        self.assert_stopped_before_anything(self.run_prepare(plain, missing=("small",), skip_game_speech=True), "small")
+
+    def test_the_main_model_missing_stops_prepare_before_it_reads_anything(self) -> None:
+        source = editor_recording(self.root / "race.mkv", self.NAMED_TWO, seconds=8)
+        self.assert_stopped_before_anything(self.run_prepare(source, missing=("medium",)), "medium")
+
+    def test_a_model_this_prepare_does_not_load_is_not_asked_for(self) -> None:
+        source = editor_recording(self.root / "race.mkv", self.NAMED_TWO, seconds=8)
+        # Without the narration no model is loaded, so none is asked for.
+        result, _steps, loads, _reads = self.run_prepare(source, missing=self.EVERY_MODEL, skip_transcript=True)
+        self.assertIsInstance(result, dict, result)
+        self.assertEqual(loads, [])
+        # Without the other voices on the game track, and with the voice named, the quick passes' model is not needed.
+        result, _steps, loads, _reads = self.run_prepare(source, missing=("small",), skip_game_speech=True)
+        self.assertIsInstance(result, dict, result)
+        self.assertEqual(sorted(set(loads)), ["base.en", "medium"])
+        result, _steps, loads, _reads = self.run_prepare(source)
+        self.assertEqual(loads, ["small"], "the narration is kept; the other voices are heard now")
+        # With the narration and the other voices stored, a Prepare that redoes only the stills reads the recording
+        # again and loads no model, so none is asked for.
+        result, steps, loads, _reads = self.run_prepare(source, missing=self.EVERY_MODEL, budget="standard")
+        self.assertIsInstance(result, dict, result)
+        self.assertEqual((steps, loads), (["read"], []))
+        result, steps, loads, reads = self.run_prepare(source, missing=self.EVERY_MODEL, budget="standard")
+        self.assertIsInstance(result, dict, result)
+        self.assertEqual((steps, loads, reads), ([], [], []), "nothing to redo: nothing read, nothing loaded")
+
+    def test_a_model_only_the_read_shows_is_needed_is_checked_before_the_narration_is_written(self) -> None:
+        # The game track has no name, so it is found by its sound: the tracks the narration is checked against are
+        # known only after the read. A stored narration that may still fit is not asked to be written again before
+        # the read; once the read shows it must be, its models are checked before Whisper starts on it.
+        source = editor_recording(self.root / "race.mkv", [("narration", "T1 - Narration"), ("game", "")], seconds=8)
+        first, _steps, _loads, _reads = self.run_prepare(source, skip_game_speech=True)
+        stamp_path = Path(first["project"]) / "analysis" / "transcript" / "narration.stamp.json"
+        stamp = json.loads(stamp_path.read_text(encoding="utf-8"))
+        self.assertEqual(stamp["compared"], [1])
+        # As if it had been written when the game track had no sound to compare it with.
+        stamp_path.write_text(json.dumps({**stamp, "compared": []}), encoding="utf-8")
+        result, steps, loads, _reads = self.run_prepare(source, missing=("base.en",), skip_game_speech=True)
+        self.assertIsInstance(result, ModelNotApproved, result)
+        self.assertEqual(result.model, "base.en")
+        self.assertEqual(steps, ["read"], "the narration was not written down again only to be stopped afterwards")
+        self.assertEqual(loads, [])
 
 
 @unittest.skipUnless(FFMPEG, "FFmpeg is required")

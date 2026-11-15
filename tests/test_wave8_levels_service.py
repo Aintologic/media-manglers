@@ -7,13 +7,17 @@ stops it at once. Measuring runs the real ``track-levels`` helper on generated r
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+import types
 import unittest
 from unittest import mock
 
@@ -24,9 +28,11 @@ from PySide6.QtCore import QObject, Signal  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from media_manglers.core import app_cache, raw_bin_library, track_levels  # noqa: E402
+from media_manglers.core import app_cache, raw_bin_library, speech_facts, track_levels  # noqa: E402
+from media_manglers.core.whisper_models import MISSING, ModelNotApproved  # noqa: E402
 from media_manglers_workbench.levels_service import STATE_WAITING_FOR_RUN, LevelsService  # noqa: E402
 from media_manglers_workbench.recording_lists import path_key  # noqa: E402
+from media_manglers_workbench.runner import RunnerResult  # noqa: E402
 from tests.test_wave8_track_levels import FFMPEG, FFPROBE, NOISE, TONE_10_TO_20, make_tracks  # noqa: E402
 from tests.test_workbench_bug_reports import _resources  # noqa: E402
 from tests.wave8_helpers import CountingLevelsRunner, helper_resources  # noqa: E402
@@ -399,6 +405,175 @@ class LevelsServiceTests(unittest.TestCase):
         QTest.qWait(200)
         self.assertIsNone(service.levels_for(source))
         self.assertEqual(CountingLevelsRunner.runs, [])
+
+
+# What the player's lanes say while Next speech waits for an approved Whisper model (installer plan, Stage 3).
+NOTE_BASE_EN = "No Next speech yet: it needs the Whisper model base.en. Approve its download in Settings > Dependencies."
+
+
+def _helper_skip_line() -> str:
+    """The note the real ``track-levels`` helper prints when its listening waits for a model that is not approved."""
+
+    frames = mock.Mock()
+    frames.read.return_value = {0: []}
+    frames.ordinals = [0]
+    frames.peaks = {}
+    printed = io.StringIO()
+    with mock.patch.object(track_levels.speech_facts, "record_measure", return_value=True), \
+            mock.patch.object(track_levels.speech_facts, "jump_points", return_value=mock.Mock(needs_listen=True)), \
+            mock.patch.object(track_levels.voice_track, "activity_from_frames", return_value={}), \
+            mock.patch.object(track_levels.voice_track, "track_details", return_value={}), \
+            mock.patch.object(track_levels.voice_track, "detect_from_activities",
+                              side_effect=ModelNotApproved("base.en", MISSING)), \
+            contextlib.redirect_stdout(printed):
+        track_levels._store_facts(Path("recording.mkv"), frames, [{}], 60.0, ffmpeg="ffmpeg", facts={},
+                                  stopped=lambda: False, work=Path("work"))
+    lines = [line for line in printed.getvalue().splitlines() if "listening_skipped" in line]
+    assert len(lines) == 1, printed.getvalue()
+    return lines[0]
+
+
+class _HelperStandIn:
+    """Stands in for the ``track-levels`` helper process: hands the service the lines a measure prints, and its
+    result. The waveform is whole; the listening for Next speech is skipped with the helper's own note until the
+    test approves the model."""
+
+    def __init__(self, test: "ListeningSkippedTests") -> None:
+        self.test = test
+
+    def run(self, command, on_log=None, *, cwd=None) -> RunnerResult:
+        argv = list(command.argv)
+        payload = json.loads(Path(argv[argv.index("--request-file") + 1]).read_text(encoding="utf-8"))["payload"]
+        self.test.payloads.append(payload)
+        lines = [track_levels.PROGRESS_PREFIX + json.dumps(
+            {"first": 0, "seconds": 10, "duration": 10.0, "tracks": {"1": [-30.0] * 10, "2": [-30.0] * 10}})]
+        if "facts" in payload:
+            if self.test.approved:
+                self.test.listened = True
+            else:
+                lines.append(self.test.skip_line)
+        for line in lines:
+            if on_log is not None:
+                on_log("stdout", line)
+        self.test.gate.wait(30)
+        Path(argv[argv.index("--result-file") + 1]).write_text(json.dumps(
+            {"ok": True, "data": {"results": [{"status": track_levels.STATUS_READY}]}, "error": ""}), encoding="utf-8")
+        return RunnerResult(status="succeeded", exit_code=0)
+
+    def cancel(self) -> None:
+        self.test.gate.set()
+
+
+class ListeningSkippedTests(unittest.TestCase):
+    """A background job never asks for a Whisper model: it skips the listening with a note. The note reaches the
+    player's lanes and the Workbench log, and the recording is listened to again once a model is approved."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = QApplication.instance() or QApplication([])
+        cls.skip_line = _helper_skip_line()
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.environment = mock.patch.dict(os.environ, {
+            raw_bin_library.LIBRARY_ROOT_ENV: str(self.root / "library"),
+            app_cache.CACHE_ROOT_ENV: str(self.root / "cache"),
+        })
+        self.environment.start()
+        self.source = self.root / "rec.mkv"
+        self.source.write_bytes(b"\0" * 64)
+        self.payloads: list[dict] = []
+        self.log: list[str] = []
+        self.approved = False
+        self.listened = False
+        self.gate = threading.Event()
+        self.gate.set()
+        resources = types.SimpleNamespace(ffmpeg_exe="ffmpeg", ffprobe_exe="ffprobe", app_root=str(self.root),
+                                          backend_source_root=str(self.root), python_exe="python")
+        self.service = LevelsService(resources=lambda: resources, settings=lambda: {}, is_idle=lambda: True,
+                                     runner_factory=lambda: _HelperStandIn(self), log=self.log.append,
+                                     facts_lookup=self._facts, facts_request=lambda: {"track_roles": ""})
+
+    def tearDown(self) -> None:
+        self.gate.set()
+        self.service.shutdown()
+        self.app.processEvents()
+        self.environment.stop()
+        self.temp.cleanup()
+
+    def _facts(self, _path: Path) -> speech_facts.JumpPoints:
+        # What the library says about the recording's speech: it still has to be listened to until it was.
+        if self.listened:
+            return speech_facts.JumpPoints(track=2, stretches=((1.0, 3.0),), measured=True)
+        return speech_facts.JumpPoints(measured=True, needs_listen=True)
+
+    def _wait(self, condition, seconds: float = 20.0) -> None:
+        deadline = time.monotonic() + seconds
+        while not condition() and time.monotonic() < deadline:
+            QTest.qWait(25)
+        self.assertTrue(condition(), "waited too long")
+
+    def _settled(self, runs: int) -> bool:
+        service = self.service
+        return (len(self.payloads) == runs and service._build is None and not service._looking
+                and not service._queue and service._done.get(path_key(self.source)) == track_levels.STATUS_READY)
+
+    def _stretches(self):
+        facts = self.service.facts_for(self.source)
+        return facts.stretches if facts is not None else ()
+
+    def test_a_skipped_listening_says_why_on_the_lanes_and_in_the_log(self) -> None:
+        self.service.want(self.source)
+        self._wait(lambda: self._settled(1))
+        self.assertIn("facts", self.payloads[0], "the build was asked to listen")
+        self.assertEqual(self.service.state_for(self.source), NOTE_BASE_EN)
+        said = [line for line in self.log if "base.en" in line]
+        self.assertEqual(len(said), 1, self.log)
+        self.assertIn("rec.mkv", said[0])
+        self.assertIn("Approve its download in Settings > Dependencies", said[0])
+        # Opened again before the model is approved: the note stays, and nothing is read again in a loop.
+        self.service.want(self.source)
+        self._wait(lambda: self._settled(1))
+        QTest.qWait(400)
+        self.assertEqual(len(self.payloads), 1)
+        self.assertEqual(self.service.state_for(self.source), NOTE_BASE_EN)
+
+    def test_a_skipped_recording_is_listened_to_again_once_the_model_is_approved(self) -> None:
+        self.service.want(self.source)
+        self._wait(lambda: self._settled(1))
+        self.assertEqual(self._stretches(), ())
+        # The operator approves base.en in Settings > Dependencies; the Workbench says so once it has downloaded.
+        self.approved = True
+        self.service.model_approved()
+        self._wait(lambda: bool(self._stretches()))
+        self._wait(lambda: self._settled(2))
+        self.assertIn("facts", self.payloads[1], "read again for its speech facts")
+        self.assertEqual(self._stretches(), ((1.0, 3.0),))
+        self.assertEqual(self.service.state_for(self.source), "", "the note is gone")
+        QTest.qWait(400)
+        self.assertEqual(len(self.payloads), 2, "listened to once more, never in a loop")
+
+    def test_a_model_approved_while_its_recording_is_measured_is_still_listened_to(self) -> None:
+        # The note can arrive just before the approved download finishes, while the helper has not ended yet.
+        self.gate.clear()
+        self.service.want(self.source)
+        self._wait(lambda: any("base.en" in line for line in self.log))
+        self.approved = True
+        self.service.model_approved()
+        self.gate.set()
+        self._wait(lambda: bool(self._stretches()))
+        self._wait(lambda: self._settled(2))
+        self.assertEqual(self.service.state_for(self.source), "")
+
+    def test_approving_a_model_with_nothing_skipped_reads_nothing(self) -> None:
+        self.approved = True
+        self.service.want(self.source)
+        self._wait(lambda: self._settled(1) and bool(self._stretches()))
+        self.service.model_approved()
+        QTest.qWait(400)
+        self.assertEqual(len(self.payloads), 1)
+        self.assertEqual(self.service.state_for(self.source), "")
 
 
 if __name__ == "__main__":

@@ -104,6 +104,7 @@ from .bug_reports import BugReportsPage
 from .build_identity import resolve_build_identity
 from .command_builder import CommandSpec, build_workflow_command, validate_effective_command
 from .dependencies import (
+    NO_BYTECODE,
     SPEECH_ROW,
     VOICE_MODEL,
     DependencyCheckStopped,
@@ -154,6 +155,7 @@ from .review_inbox_dialogs import (
 )
 from .run_control import RunControl
 from .main_settings import main_temp_folder, review_evidence_root, review_work_root, run_output_folder, track_choice_state
+from .child_jobs import keep_with_workbench
 from .runner import FakeRunner, RunnerResult, SubprocessRunner, hidden_subprocess_creation_flags
 from .settings import (
     BUG_REPORT_RECORDING_LIST_KEYS,
@@ -800,9 +802,13 @@ class DependencyCheckThread(QThread):
         configured_vlc: str = "",
         translation_needs_argos: bool = False,
         quick_model: str = "",
+        main_model: str = "",
+        downloading_models: list[str] | None = None,
     ) -> None:
         super().__init__()
         self.quick_model = quick_model
+        self.main_model = main_model
+        self.downloading_models = list(downloading_models or [])
         self.resources = resources
         self.selected_model = selected_model
         self.configured_python = configured_python
@@ -834,6 +840,8 @@ class DependencyCheckThread(QThread):
                 runner=self._runner,
                 translation_needs_argos=self.translation_needs_argos,
                 quick_model=self.quick_model,
+                main_model=self.main_model,
+                downloading_models=self.downloading_models,
             )
         except DependencyCheckStopped:
             return
@@ -896,6 +904,8 @@ class HelperDownloadThread(QThread):
             self._process = subprocess.Popen(self.argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                              stderr=subprocess.DEVNULL,
                                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            # M15 of the Wave I-A review: a download ends with the Workbench, however the Workbench ends.
+            keep_with_workbench(self._process)
         except OSError as exc:
             self.download_finished.emit(False, f"The download could not start: {exc}")
             return
@@ -1252,6 +1262,8 @@ class WorkbenchWindow(QMainWindow):
         self.dependency_check_thread: DependencyCheckThread | None = None
         # Installer plan, Stage 3: the Whisper model download the operator approved, while it runs.
         self.model_download_thread: ModelDownloadThread | None = None
+        # M6 of the Wave I-A review: models approved while another download runs, started when it ends.
+        self.queued_model_downloads: list[str] = []
         # Installer plan, Stage 4: the shared first-launch setup, while it runs; whether this launch may ask its
         # question (not during the build's smoke launch or an offscreen run); and whether it has asked it already.
         self.speech_setup_thread: SpeechSetupThread | None = None
@@ -5082,11 +5094,15 @@ class WorkbenchWindow(QMainWindow):
                 )
             # Installer plan, Stage 3: the selected model and base.en (voice detection) must be on this PC as Whisper
             # published them; only the approval in Settings > Dependencies downloads one.
-            if model is not None and model.status == "not_checked":
+            # M3 and M8 of the Wave I-A review: a model on this PC whose check did not finish blocks nothing (the run
+            # checks it before use); one downloading now is refused below in its own words.
+            if model is not None and model.status == "not_checked" and model.model_state not in {
+                    "unverified", "downloading"}:
                 errors.append(
                     "The selected Whisper model has not been checked. Refresh readiness in Settings > Dependencies."
                 )
             errors.extend(self.model_blockers([str(self.run_settings.get("whisper_model") or ""), VOICE_MODEL]))
+            errors.extend(self.translation_choice_blockers())
         if kind == "url" and self.current_workflow == WORKFLOW_FULL_REVIEW and self.resources.preflight_complete:
             ytdlp = self._dependency_by_key("ytdlp")
             if ytdlp is None or not ytdlp.ready:
@@ -5796,9 +5812,10 @@ class WorkbenchWindow(QMainWindow):
             if blockers:
                 warn(self, "Speech recognition is not set up", "\n\n".join(blockers))
                 return False
-        if kind == "bug_reports":
-            # Installer plan, Stage 3: Find my bug reports checks its Whisper models like the main Start does.
-            blockers = self.model_blockers([str(settings.get("whisper_model") or ""), VOICE_MODEL])
+        if kind in SPEECH_RUN_KINDS:
+            # Installer plan, Stage 3: every feature that loads Whisper checks its models like the main Start does,
+            # before any work (M2 and M4 of the Wave I-A review).
+            blockers = self.model_blockers(self.run_models(kind, settings))
             if blockers:
                 warn(self, "The Whisper model is not ready", "\n\n".join(blockers))
                 return False
@@ -9203,7 +9220,9 @@ class WorkbenchWindow(QMainWindow):
         self.dependency_check_banner.show_job(JobInfo(
             token="readiness-check", title="Checking the tools the Workbench uses", state="active",
             detail="Python, FFmpeg, Whisper and the rest; nothing is installed or changed"))
-        selected_model = str(self.run_settings.get("whisper_model") or "base.en")
+        selected_model, main_model, quick_model = self.readiness_models()
+        # M13 of the Wave I-A review: the Python is chosen for this translation setting; Start checks it still holds.
+        self.readiness_translation_argos = translation_needs_argos(self.run_settings)
         thread = DependencyCheckThread(
             self.resources,
             selected_model,
@@ -9214,7 +9233,9 @@ class WorkbenchWindow(QMainWindow):
             str(self.app_settings.get("video_player_vlc_path") or ""),
             translation_needs_argos=translation_needs_argos(self.run_settings),
             # Installer plan, Stage 3: the AI Video Editor's quick-pass model gets its own row.
-            quick_model=editor_quick_model(self.app_settings, {"model_name": selected_model}),
+            quick_model=quick_model,
+            main_model=main_model,
+            downloading_models=list(getattr(self.model_download_thread, "models", None) or []),
         )
         thread.check_ready.connect(self._dependency_check_ready)
         thread.check_failed.connect(self._dependency_check_failed)
@@ -10035,8 +10056,21 @@ class WorkbenchWindow(QMainWindow):
         Dependencies; readiness is checked again when it ends (installer plan, Stage 3)."""
 
         models = [name for name in dict.fromkeys(str(item or "").strip() for item in models) if name]
-        if not models or self.model_download_thread is not None:
+        if not models:
             return False
+        if self.model_download_thread is not None:
+            # M6 of the Wave I-A review: an approval while another model downloads is kept and started after it,
+            # never silently dropped.
+            running = list(getattr(self.model_download_thread, "models", None) or [])
+            added = [name for name in models if name not in running and name not in self.queued_model_downloads]
+            self.queued_model_downloads += added
+            waiting = ", ".join(self.queued_model_downloads) or ", ".join(models)
+            self.dependency_summary.setText(
+                f"The Whisper model {', '.join(running)} is downloading now. {waiting} will download as soon as it "
+                "has finished; you do not need to approve it again.")
+            if added:
+                self._write_workbench_log(f"Whisper model download approved and waiting its turn: {', '.join(added)}.")
+            return True
         if self.speech_setup_thread is not None:
             # Installer plan, Stage 4: one download job at a time; the setup fetches base.en itself.
             self.dependency_summary.setText("Speech recognition is being set up now (it fetches base.en too). "
@@ -10080,12 +10114,26 @@ class WorkbenchWindow(QMainWindow):
         except OSError:
             pass  # the Workbench's own temporary folder; clean-up removes it later
         if ok:
-            QTimer.singleShot(0, self.start_dependency_check)
+            # Readiness is checked again once the job has ended (``_model_download_stopped``), so the model just
+            # downloaded is never shown as still downloading.
+            self._readiness_after_download = True
+            # M7 of the Wave I-A review: recordings whose Next speech was skipped for want of a model are listened to
+            # again, without a restart.
+            levels = getattr(self, "levels_service", None)
+            if levels is not None:
+                levels.model_approved()
 
     def _model_download_stopped(self, worker: ModelDownloadThread) -> None:
         worker.deleteLater()
         if self.model_download_thread is worker:
             self.model_download_thread = None
+            if self.queued_model_downloads:
+                # M6: the models approved while this one downloaded start now, one job after the other.
+                waiting, self.queued_model_downloads = self.queued_model_downloads, []
+                QTimer.singleShot(0, lambda models=waiting: self.start_model_download(models))
+            if getattr(self, "_readiness_after_download", False):
+                self._readiness_after_download = False
+                QTimer.singleShot(0, self.start_dependency_check)
 
     # Installer plan, Stage 4: the shared first-launch setup ----------------------------------------------------
 
@@ -10248,6 +10296,10 @@ class WorkbenchWindow(QMainWindow):
         if ok:
             self.app_settings["speech_setup_declined"] = False
             self.save_app_settings()
+            # M7 of the Wave I-A review: the setup fetches base.en too, so skipped recordings are listened to again.
+            levels = getattr(self, "levels_service", None)
+            if levels is not None:
+                levels.model_approved()
         try:
             safe_write.remove_disposable_tree(work, within=work.parent)
         except OSError:
@@ -10259,16 +10311,65 @@ class WorkbenchWindow(QMainWindow):
         if self.speech_setup_thread is worker:
             self.speech_setup_thread = None
 
+    def translation_choice_blockers(self) -> list[str]:
+        """M13 of the Wave I-A review: readiness chose the Python for the translation setting it saw (a Python of
+        yours with Argos Translate is kept for Local translation to a language other than English). When that setting
+        has changed since, the choice may be wrong for this run, so Start asks for it to be checked again."""
+
+        seen = getattr(self, "readiness_translation_argos", None)
+        if seen is None or not self.private_python() or seen == translation_needs_argos(self.run_settings):
+            return []
+        return ["Your translation settings changed since the Workbench chose which Python runs this review. Open "
+                "Settings > Dependencies and choose Refresh readiness, then Start."]
+
+    def readiness_models(self) -> tuple[str, str, str]:
+        """The Whisper models readiness checks (M2 of the Wave I-A review): New Review's model; the main model saved
+        in Settings, which Find my bug reports, the raw bin's scans and the AI Video Editor load; and the editor's
+        real quick-pass model, worked out from that main model."""
+
+        selected = str(self.run_settings.get("whisper_model") or "base.en")
+        main = str(self.app_settings.get("whisper_model") or "medium")
+        return selected, main, editor_quick_model(self.app_settings, {"model_name": main})
+
+    def run_models(self, kind: str, settings: dict[str, Any]) -> list[str]:
+        """The Whisper models a feature's run loads, checked before it starts (M2 and M4 of the Wave I-A review)."""
+
+        main = str(settings.get("whisper_model") or self.app_settings.get("whisper_model") or "medium")
+        if kind == "bug_reports":
+            return [main, VOICE_MODEL]
+        if kind in {"raw_scan", "raw_deep_scan"}:
+            return [main]
+        if kind == "editor_prepare":
+            return [main, VOICE_MODEL, editor_quick_model(self.app_settings, {"model_name": main})]
+        return []
+
     def model_blockers(self, models: list[str]) -> list[str]:
         """Installer plan, Stage 3: why each of ``models`` cannot be used yet, from its readiness row: missing or not
-        matching the file Whisper published. A model not checked yet blocks nothing here; its run's own check
-        refuses it in the same words."""
+        matching the file Whisper published, downloading now, or (once readiness has run) not checked at all. A row
+        that could not be checked blocks nothing here; its run's own check refuses a bad model in the same words."""
 
         reasons: list[str] = []
+        downloading = set(getattr(getattr(self, "model_download_thread", None), "models", None) or [])
+        # A model with no row is refused only when readiness checked models at all (it always does, one row per model
+        # a workflow loads), so the row is missing because the setting changed since.
+        checked_models = any(item.key.startswith("whisper_model") for item in self.resources.dependencies)
         for name in dict.fromkeys(str(item or "").strip() for item in models):
+            if not name:
+                continue
+            if name in downloading:
+                # M8 of the Wave I-A review: nothing reads a model while its approved download puts it in place.
+                reasons.append(f"Whisper model {name}: it is downloading now. Start again when the download has "
+                               "finished.")
+                continue
             row = next((item for item in self.resources.dependencies
                         if item.key.startswith("whisper_model") and item.model == name), None)
-            if row is None or row.ready or row.status in {"not_checked", "checking", "info"}:
+            if row is None:
+                if checked_models and getattr(self.resources, "preflight_complete", True):
+                    # M2: a model this run loads that readiness never checked (the setting changed since).
+                    reasons.append(f"Whisper model {name}: not checked yet. Open Settings > Dependencies and choose "
+                                   "Refresh readiness.")
+                continue
+            if row.ready or row.status in {"not_checked", "checking", "info"}:
                 continue
             reasons.append(f"Whisper model {name}: {row.detail} Open Settings > Dependencies to approve it.")
         return reasons
@@ -10345,17 +10446,31 @@ ALREADY_OPEN_TEXT = (
 ALREADY_OPEN_EXIT = 4
 
 
+def prepare_child_environment() -> None:
+    """What every program this Workbench starts inherits (M14 of the Wave I-A review): no Python it starts (a
+    readiness probe, a helper, the backend's own Python runs) writes compiled bytecode, so nothing is written into a
+    Python already on the PC, nor Media Manglers' own compiled code into the application folder. Our own Python's
+    files and its speech libraries are compiled ahead, at the build and at setup."""
+
+    os.environ[NO_BYTECODE] = "1"
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     # 224 (Wave B2a): everything this Workbench starts (the host, the helpers, FFmpeg) inherits its process
     # number, so a file one of them holds counts as the app's own and is never waited for.
     safe_write.mark_app_process()
+    prepare_child_environment()
     # Installer plan, Stage 2: one Workbench at a time for the same data, and every running Media Manglers holds
     # the lock the installer looks for. A second Workbench says so and closes before it opens anything.
     if not app_locks.take_workbench_lock():
         if args.offscreen:
             os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-        if not args.smoke_test:
+        # L12 of the Wave I-A review: the box is shown only where someone can see it and close it; a launch for a
+        # screenshot or a timed check would otherwise wait for ever on a box no one can see.
+        unseen = (args.smoke_test or args.offscreen or args.exit_after_ms or args.capture_screenshot
+                  or os.environ.get("QT_QPA_PLATFORM", "").casefold() == "offscreen")
+        if not unseen:
             notice_app = QApplication.instance() or QApplication(qt_arguments(sys.argv[:1]))
             QMessageBox.information(None, ALREADY_OPEN_TITLE, ALREADY_OPEN_TEXT)
             del notice_app

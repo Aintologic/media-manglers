@@ -169,7 +169,7 @@ def plain_problem(exc: BaseException, root: Path | None = None) -> tuple[str, st
     if "database is locked" in text or "database table is locked" in text or winerror in _HELD_ERRORS or (
             number in (errno.EDEADLK, errno.EACCES) and winerror is None and "lock" in text):
         return ("Your library file is locked by another program, so it could not be opened.",
-                "Close the other program or Workbench window that has it open, or wait a moment, then start the "
+                "Wait a moment, then start the "
                 "Workbench again.")
     if "disk i/o error" in text or winerror in _DRIVE_ERRORS or number == errno.EIO or (
             isinstance(exc, OSError) and folder.anchor and not Path(folder.anchor).exists()):

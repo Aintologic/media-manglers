@@ -12,7 +12,7 @@ import shutil
 import subprocess
 import threading
 import time
-from typing import Callable
+from typing import Callable, Iterable
 
 from media_manglers.core import speech_setup
 from media_manglers.core.user_folders import addons_root
@@ -77,6 +77,19 @@ def _end_process_tree(process: subprocess.Popen[str]) -> None:
         process.kill()
 
 
+NO_BYTECODE = "PYTHONDONTWRITEBYTECODE"
+
+
+def no_bytecode_environment(env: dict[str, str] | None = None) -> dict[str, str]:
+    """``env`` (this process's own when None) with Python's bytecode writing turned off (M14 of the Wave I-A review):
+    a probe only looks at a Python, so it never writes compiled files into that Python's own folders, nor Media
+    Manglers' own code's into the application folder."""
+
+    found = dict(os.environ if env is None else env)
+    found[NO_BYTECODE] = "1"
+    return found
+
+
 class StoppableRunner:
     """Runs each readiness probe so that it can be stopped at once, with everything it started.
 
@@ -112,7 +125,7 @@ class StoppableRunner:
             stderr=subprocess.PIPE,
             text=True,
             errors="replace",
-            env=env,
+            env=no_bytecode_environment(env),
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         with self._lock:
@@ -177,28 +190,33 @@ def discover_python_candidates(
     configured_python: str = "",
     runner: CommandRunner = _default_runner,
 ) -> list[str]:
+    """Every Python on this PC worth probing, in one order that ``Video Mangler.ps1``'s
+    ``Get-AutoPythonInterpreterCandidates`` keeps too (M11 of the Wave I-A review): the Python given (ours, in a
+    packaged copy), then ``python`` on PATH, then the one ``py -3`` starts, then every ``python`` ``where`` finds, then
+    the folders Python's installers use. Python's own installer leaves PATH alone by default and relies on ``py``, so
+    a Python of yours is found even beside ours."""
+
     if configured_python:
         return _unique_existing([configured_python])
     candidates: list[str] = []
     primary = str(resources.python_exe or "").strip()
+    launcher = ""
     if primary:
-        primary_path = Path(primary)
-        if primary_path.name.casefold() in {"py", "py.exe"}:
-            try:
-                result = runner(
-                    [primary, "-3", "-c", "import sys; print(sys.executable)"],
-                    30,
-                    None,
-                )
-                if result.returncode == 0:
-                    candidates.extend(result.stdout.splitlines())
-            except (OSError, subprocess.SubprocessError):
-                pass
+        if Path(primary).name.casefold() in {"py", "py.exe"}:
+            launcher = primary
         else:
             candidates.append(primary)
     direct = shutil.which("python.exe") or shutil.which("python")
     if direct:
         candidates.append(direct)
+    launcher = launcher or shutil.which("py.exe") or shutil.which("py") or ""
+    if launcher:
+        try:
+            result = runner([launcher, "-3", "-c", "import sys; print(sys.executable)"], 30, None)
+            if result.returncode == 0:
+                candidates.extend(result.stdout.splitlines())
+        except (OSError, subprocess.SubprocessError):
+            pass
     where = shutil.which("where.exe")
     if where:
         try:
@@ -207,11 +225,8 @@ def discover_python_candidates(
                 candidates.extend(result.stdout.splitlines())
         except (OSError, subprocess.SubprocessError):
             pass
-    found = _unique_existing(candidates)
-    if not any(not _is_windows_store_alias(item) for item in found):
-        # 188: nothing usable on PATH; look where the Python installers put it.
-        found = _unique_existing(found + standard_locations(TOOL_SOURCES["python"]))
-    return found
+    # 188: and where the Python installers put it.
+    return _unique_existing(candidates + standard_locations(TOOL_SOURCES["python"]))
 
 
 def _chosen_or_found(configured: str, found: str) -> tuple[str, str]:
@@ -263,7 +278,9 @@ result = {
     "error": "",
 }
 try:
-    import media_manglers
+    # M12 of the Wave I-A review: the helper's own command module, as every helper step imports it; a Python that
+    # cannot load it (too old, or missing what it needs) cannot run any step, however ready the rest looks.
+    import media_manglers.cli
     result["helper_import_ok"] = True
 except Exception as exc:
     result["error"] = "Media Manglers helper import failed: " + str(exc)
@@ -313,22 +330,25 @@ table = model_table()
 print(json.dumps({name: model_state(name, table=table).to_dict() for name in sys.argv[1:]}), flush=True)
 """
 
-# The models a workflow will load: the selected model; base.en, which every review's voice detection uses; and the
-# AI Video Editor's quick-pass model. (row key, what it is for)
+# The models a workflow will load: the selected model (New Review's); the main model saved in Settings, which Find my
+# bug reports, the raw bin's scans and the AI Video Editor load (M2 of the Wave I-A review); base.en, which every
+# review's voice detection uses; and the AI Video Editor's quick-pass model. (row key, what it is for)
 MODEL_ROWS = (
     ("whisper_model", "Transcripts with the selected model."),
+    ("whisper_model_main", "Find my bug reports, the raw bin's scans and the AI Video Editor, with the model saved "
+                           "in Settings."),
     ("whisper_model_voice", "Finds which track is your voice, in every review and scan."),
     ("whisper_model_quick", "The AI Video Editor's quick passes over a whole race."),
 )
 VOICE_MODEL = "base.en"
 
 
-def required_models(selected_model: str, quick_model: str = "") -> list[tuple[str, str, str]]:
+def required_models(selected_model: str, quick_model: str = "", main_model: str = "") -> list[tuple[str, str, str]]:
     """(row key, model, purpose) for each model a workflow will load, each model once."""
 
     rows: list[tuple[str, str, str]] = []
     seen: set[str] = set()
-    for (key, purpose), model in zip(MODEL_ROWS, (selected_model, VOICE_MODEL, quick_model)):
+    for (key, purpose), model in zip(MODEL_ROWS, (selected_model, main_model, VOICE_MODEL, quick_model)):
         model = str(model or "").strip()
         if model and model.casefold() not in seen:
             seen.add(model.casefold())
@@ -382,6 +402,17 @@ def _model_row(key: str, model: str, purpose: str, state: dict[str, object], *, 
         status, detail, actions = "needs_setup", (
             "This Whisper does not know a model by that name. Choose another Whisper model in Settings."), {
             "action_label": "Install guide", "action_kind": "install_guide"}
+    elif found == "unverified":
+        # M3 of the Wave I-A review: the check against the published file did not finish (a slow disk, a locked
+        # file), so nothing is claimed; each run checks the model before it uses it.
+        status, detail, actions = "not_checked", (
+            "On this PC, but not checked against the file Whisper published yet, because the check did not finish. "
+            "A run checks it before using it. Refresh readiness to check it now; if it is damaged, approve its "
+            f"download ({estimate}) to replace it."), approve
+    elif found == "downloading":
+        status, detail, actions = "not_checked", (
+            "Downloading now, after your approval. It is checked against the file Whisper published before it is "
+            "used."), {}
     else:
         # Not answered: nothing is known, so nothing is blocked here; a run's own check refuses a missing model.
         status, detail, actions = "not_checked", (
@@ -540,11 +571,14 @@ def select_python(
 
 
 def translation_needs_argos(settings: dict[str, object]) -> bool:
-    """Whether translation runs locally with Argos: a target language is set and the mode is Local or Hybrid."""
+    """Whether translation runs locally with Argos (M13 of the Wave I-A review): the mode is Local (an unset mode is
+    Local) and a target language other than English is set. English comes from Whisper's own translation; Hybrid
+    translates to English only, and AI without Argos. ``Video Mangler.ps1``'s ``Test-TranslationNeedsArgos`` is the
+    same rule."""
 
-    targets = str(settings.get("translate_to") or "").strip()
+    targets = [item for item in re.split(r"[,\s]+", str(settings.get("translate_to") or "").strip().casefold()) if item]
     mode = str(settings.get("processing_mode") or "Local").strip().casefold()
-    return bool(targets) and mode in {"local", "hybrid"}
+    return mode == "local" and any(item != "en" for item in targets)
 
 
 def _tool_version(
@@ -613,8 +647,11 @@ def run_dependency_preflight(
     vlc_finder: Callable[[str], str] = find_vlc,
     translation_needs_argos: bool = False,
     quick_model: str = "",
+    main_model: str = "",
+    downloading_models: Iterable[str] = (),
 ) -> DependencyPreflightResult:
-    """Check the runtime path without opening or processing any source media."""
+    """Check the runtime path without opening or processing any source media. A model in ``downloading_models`` (an
+    approved download running now) is not read: its row says so (M8 of the Wave I-A review)."""
 
     timestamp = checked_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
     bundled_dir = str(getattr(resources, "bundled_dir", "") or "")
@@ -876,18 +913,22 @@ def run_dependency_preflight(
     # published, in the Python that runs Whisper (ours, or one of yours kept under an exception). A valid model
     # already in the cache is reused; a missing or damaged one offers Approve download, and nothing downloads
     # until you approve it.
-    models = required_models(selected_model, quick_model)
-    states = (_model_states(selected_path, [model for _key, model, _purpose in models], resources.backend_source_root,
-                            runner)
+    models = required_models(selected_model, quick_model, main_model)
+    downloading = {str(name) for name in downloading_models}
+    # M8 of the Wave I-A review: a model being downloaded is never read here, so this check cannot hold the old file
+    # just as the finished download takes its place.
+    checked = [model for _key, model, _purpose in models if model not in downloading]
+    states = (_model_states(selected_path, checked, resources.backend_source_root, runner)
               if selected_path and selected_probe.get("helper_import_ok") else {})
     for key, model, purpose in models:
-        state = states.get(model) or {}
+        state = {"state": "downloading"} if model in downloading else states.get(model) or {}
         if not state and model == selected_model and selected_probe.get("model_known") is not None:
-            # The checksum probe did not answer: the main probe's own look at the cache is the best there is.
+            # The checksum probe did not answer: the main probe saw only whether a file is there. A file that is
+            # there was not checked, so it is never called valid (M3 of the Wave I-A review).
             if not selected_probe.get("model_known"):
                 state = {"state": "unknown"}
             else:
-                state = {"state": "valid" if selected_probe.get("model_cached") else "missing",
+                state = {"state": "unverified" if selected_probe.get("model_cached") else "missing",
                          "path": selected_probe.get("model_cache_path") or ""}
         dependencies.append(_model_row(key, model, purpose, state, checked_at=timestamp))
 
